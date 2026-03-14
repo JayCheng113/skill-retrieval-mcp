@@ -768,6 +768,33 @@ class TestPull:
         assert store.count() == 5
         store.close()
 
+    def test_pull_empty_db_uses_fast_path(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull after init (empty DB) should use copy, not slow merge."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        self._mock_download(fake_db, monkeypatch)
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+        # Should show "Loaded" (copy path), not "Merged" (merge path)
+        assert "Loaded" in result.output
+        assert "Merged" not in result.output
+
+    def test_pull_merge_warns_stale_index(self, runner, populated_data_dir, tmp_path, monkeypatch):
+        """Pull with existing index should warn about staleness."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        self._mock_download(fake_db, monkeypatch)
+        result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "pull"])
+        assert result.exit_code == 0
+        assert "stale" in result.output.lower()
+
+    def test_pull_replace_clears_stale_index(self, runner, populated_data_dir, tmp_path, monkeypatch):
+        """Pull --replace should remove the old index."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        self._mock_download(fake_db, monkeypatch)
+        result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "pull", "--replace"])
+        assert result.exit_code == 0
+        assert not (populated_data_dir / "index" / "index.faiss").exists()
+
 
 class TestSkillSourceCompat:
     """Ensure SKILLNET source from HF dataset is handled correctly."""

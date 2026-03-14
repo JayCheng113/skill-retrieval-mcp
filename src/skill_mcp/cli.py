@@ -146,10 +146,16 @@ def pull(ctx, replace: bool, include_index: bool):
     cached_db = download_skills_db()
     db_path = config.db_path
 
-    if not db_path.exists() or replace:
-        # Fast path: no local data or explicit replace — copy directly
+    # Decide: copy (fast) vs merge (preserves custom skills)
+    local_count = 0
+    if db_path.exists():
+        probe = SkillStore(db_path, readonly=True)
+        local_count = probe.count()
+        probe.close()
+
+    if not db_path.exists() or replace or local_count == 0:
+        # Fast path: no local data, empty DB, or explicit replace — copy directly
         shutil.copy2(cached_db, db_path)
-        # Re-init FTS index (copy doesn't include virtual table data from triggers)
         _rebuild_fts(db_path)
         store = SkillStore(db_path, readonly=True)
         click.echo(f"Loaded {store.count():,} skills")
@@ -163,9 +169,20 @@ def pull(ctx, replace: bool, include_index: bool):
         click.echo(f"Store: {before:,} -> {store.count():,} skills")
         store.close()
 
+    # Warn about stale index (after both copy and merge paths)
+    index_path = config.index_dir / "index.faiss"
     if include_index:
         _pull_index(config)
+    elif index_path.exists() and not replace:
+        click.echo("Note: index may be stale. Run `skill-mcp build-index --force` to rebuild.")
     else:
+        if replace and index_path.exists():
+            # Clean stale index after --replace
+            index_path.unlink()
+            meta = config.index_dir / "skill_ids.json"
+            if meta.exists():
+                meta.unlink()
+            click.echo("Cleared stale index.")
         click.echo("\nNext step:")
         click.echo("  skill-mcp build-index --backend sentence-transformers")
 
