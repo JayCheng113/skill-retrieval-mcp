@@ -19,14 +19,18 @@ class SkillIndex:
         self.index = faiss.IndexFlatIP(dimension)
         self.skill_ids: list[str] = []
         self._dimension = dimension
+        self.embedding_info: dict[str, str] = {}
 
     def build(
         self,
         store: SkillStore,
         embedding_model: EmbeddingModel,
         batch_size: int = 64,
+        show_progress: bool = True,
     ) -> None:
         """Build index from all skills in store."""
+        from tqdm import tqdm
+
         skills = store.get_all()
         if not skills:
             return
@@ -34,7 +38,17 @@ class SkillIndex:
         texts = [s.to_embedding_text() for s in skills]
         ids = [s.id for s in skills]
 
-        vectors = embedding_model.encode(texts, batch_size=batch_size)
+        # Encode in batches with progress bar
+        all_vectors = []
+        iterator = range(0, len(texts), batch_size)
+        if show_progress and len(texts) > batch_size:
+            iterator = tqdm(iterator, desc="Encoding skills", unit="batch")
+        for i in iterator:
+            batch = texts[i : i + batch_size]
+            batch_vecs = embedding_model.encode(batch, batch_size=batch_size)
+            all_vectors.append(batch_vecs)
+
+        vectors = np.vstack(all_vectors)
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         norms = np.maximum(norms, 1e-10)
         vectors = vectors / norms
@@ -68,10 +82,11 @@ class SkillIndex:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         faiss.write_index(self.index, str(path / "index.faiss"))
+        meta = {"skill_ids": self.skill_ids, "dimension": self._dimension}
+        if self.embedding_info:
+            meta["embedding"] = self.embedding_info
         with open(path / "skill_ids.json", "w") as f:
-            json.dump(
-                {"skill_ids": self.skill_ids, "dimension": self._dimension}, f
-            )
+            json.dump(meta, f)
 
     @classmethod
     def load(cls, path: Path) -> SkillIndex:
@@ -82,4 +97,5 @@ class SkillIndex:
         idx = cls(dimension=meta["dimension"])
         idx.index = faiss.read_index(str(path / "index.faiss"))
         idx.skill_ids = meta["skill_ids"]
+        idx.embedding_info = meta.get("embedding", {})
         return idx

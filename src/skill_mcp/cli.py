@@ -9,19 +9,40 @@ import click
 
 
 @click.group()
-def main():
+@click.option("--data-dir", "global_data_dir", default=None, envvar="SKILL_MCP_DATA_DIR",
+              help="Override data directory (default: ~/.skill-mcp, env: SKILL_MCP_DATA_DIR)")
+@click.pass_context
+def main(ctx, global_data_dir: str | None):
     """skill-retrieval-mcp: RAG-based skill retrieval for AI agents."""
-    pass
+    ctx.ensure_object(dict)
+    ctx.obj["data_dir"] = global_data_dir
+
+
+def _load_config_from_ctx(ctx) -> "Config":
+    """Load config, respecting the global --data-dir override."""
+    from skill_mcp.config import load_config
+
+    data_dir = ctx.obj.get("data_dir") if ctx.obj else None
+    if data_dir:
+        config_path = Path(data_dir).expanduser() / "config.yaml"
+        config = load_config(config_path)
+        config.data_dir = data_dir
+        return config
+    return load_config()
 
 
 @main.command()
-@click.option("--data-dir", default="~/.skill-mcp", help="Data directory")
+@click.option("--data-dir", default=None, help="Data directory (default: ~/.skill-mcp)")
 @click.option("--no-register", is_flag=True, help="Skip MCP agent registration")
-def init(data_dir: str, no_register: bool):
+@click.pass_context
+def init(ctx, data_dir: str | None, no_register: bool):
     """Initialize skill-retrieval-mcp data directory and config."""
     from skill_mcp.config import Config, EmbeddingConfig, SearchConfig, ServerConfig, save_config
     from skill_mcp.store import SkillStore
 
+    # Global --data-dir takes precedence, then local --data-dir, then default
+    global_dir = ctx.obj.get("data_dir") if ctx.obj else None
+    data_dir = global_dir or data_dir or "~/.skill-mcp"
     data_path = Path(data_dir).expanduser()
     data_path.mkdir(parents=True, exist_ok=True)
 
@@ -94,13 +115,13 @@ def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
 )
 @click.option("--path", "source_path", type=click.Path(exists=True), required=True)
 @click.option("--db", type=click.Path(), default=None, help="Database path (default: ~/.skill-mcp/skills.db)")
-def import_skills(source: str, source_path: str, db: str | None):
+@click.pass_context
+def import_skills(ctx, source: str, source_path: str, db: str | None):
     """Import skills from a source into the store."""
-    from skill_mcp.config import load_config
     from skill_mcp.store import SkillStore
 
+    config = _load_config_from_ctx(ctx)
     if db is None:
-        config = load_config()
         db = str(config.db_path)
 
     store = SkillStore(db)
@@ -122,6 +143,8 @@ def import_skills(source: str, source_path: str, db: str | None):
     stats = importer.import_skills(path, store)
     click.echo(f"Imported: {stats.added} added, {stats.replaced} replaced, {stats.skipped_duplicate} duplicates")
     click.echo(f"Store now has {store.count()} skills")
+    if (stats.added > 0 or stats.replaced > 0) and (config.index_dir / "index.faiss").exists():
+        click.echo("Note: index is now stale. Run `skill-mcp build-index --force` to rebuild.")
     store.close()
 
 
@@ -131,14 +154,15 @@ def import_skills(source: str, source_path: str, db: str | None):
 @click.option("--db", type=click.Path(), default=None)
 @click.option("--output", type=click.Path(), default=None, help="Index output directory")
 @click.option("--force", is_flag=True, help="Overwrite existing index")
-def build_index(backend: str, model: str | None, db: str | None, output: str | None, force: bool):
+@click.pass_context
+def build_index(ctx, backend: str, model: str | None, db: str | None, output: str | None, force: bool):
     """Build FAISS vector index from skill store."""
-    from skill_mcp.config import load_config
+    from skill_mcp.config import save_config
     from skill_mcp.embeddings import EmbeddingModel
     from skill_mcp.index import SkillIndex
     from skill_mcp.store import SkillStore
 
-    config = load_config()
+    config = _load_config_from_ctx(ctx)
     if db is None:
         db = str(config.db_path)
     if output is None:
@@ -161,48 +185,65 @@ def build_index(backend: str, model: str | None, db: str | None, output: str | N
     click.echo(f"Building index for {skill_count} skills with {backend}/{model}...")
     emb = EmbeddingModel(model_name=model, backend=backend)
     index = SkillIndex(emb.dimension)
+    index.embedding_info = {"backend": backend, "model": model}
     index.build(store, emb)
     index.save(output_path)
 
+    # Write the actual backend/model used back to config so serve uses the same
+    config.embedding.backend = backend
+    config.embedding.model = model
+    save_config(config)
+
     click.echo(f"Index built with {len(index.skill_ids)} skills, saved to {output_path}")
+    click.echo(f"Config updated: embedding.backend={backend}, embedding.model={model}")
     store.close()
 
 
 @main.command()
 @click.option("--transport", default="stdio", type=click.Choice(["stdio", "sse"]))
-def serve(transport: str):
+@click.pass_context
+def serve(ctx, transport: str):
     """Start the MCP server."""
     import asyncio
     from skill_mcp.server import run_server
-    asyncio.run(run_server())
+
+    config = _load_config_from_ctx(ctx)
+    asyncio.run(run_server(config_path=config.config_path, transport=transport))
 
 
 @main.command()
-def status():
+@click.pass_context
+def status(ctx):
     """Show status of skill-retrieval-mcp."""
-    from skill_mcp.config import load_config
-
-    config = load_config()
+    config = _load_config_from_ctx(ctx)
     data_dir = config.resolved_data_dir
 
     click.echo(f"Data directory: {data_dir}")
     click.echo(f"Config: {config.config_path} ({'exists' if config.config_path.exists() else 'missing (using defaults)'})")
 
     db_path = config.db_path
+    db_count = 0
     if db_path.exists():
         from skill_mcp.store import SkillStore
         store = SkillStore(db_path, readonly=True)
-        click.echo(f"Skills: {store.count()}")
+        db_count = store.count()
+        click.echo(f"Skills: {db_count}")
         cats = store.categories()
         if cats:
             click.echo(f"Categories: {', '.join(cats)}")
         store.close()
     else:
-        click.echo("Database: not found")
+        click.echo("Database: not found (run `skill-mcp init` first)")
 
     index_path = config.index_dir / "index.faiss"
-    if index_path.exists():
-        click.echo(f"Index: built ({index_path})")
+    meta_path = config.index_dir / "skill_ids.json"
+    if index_path.exists() and meta_path.exists():
+        with open(meta_path) as f:
+            meta = json.load(f)
+        index_count = len(meta.get("skill_ids", []))
+        click.echo(f"Index: {index_count} skills ({index_path})")
+        if db_count > 0 and index_count != db_count:
+            click.echo(f"  WARNING: index ({index_count}) != store ({db_count}). Run `skill-mcp build-index --force`.")
     else:
         click.echo("Index: not built")
 
@@ -212,15 +253,20 @@ def status():
 @main.command()
 @click.argument("query")
 @click.option("--k", default=5, help="Number of results")
-def search(query: str, k: int):
+@click.pass_context
+def search(ctx, query: str, k: int):
     """Search for skills locally (for testing)."""
-    from skill_mcp.config import load_config
     from skill_mcp.embeddings import EmbeddingModel
     from skill_mcp.index import SkillIndex
     from skill_mcp.retriever import retrieve
     from skill_mcp.store import SkillStore
 
-    config = load_config()
+    config = _load_config_from_ctx(ctx)
+
+    if not config.db_path.exists():
+        click.echo("No skill database found. Run `skill-mcp init` first.")
+        return
+
     store = SkillStore(config.db_path, readonly=True)
 
     index_dir = config.index_dir
@@ -234,9 +280,11 @@ def search(query: str, k: int):
         return
 
     index = SkillIndex.load(index_dir)
+    # Use embedding info from index metadata (matches what was used to build)
+    emb_info = index.embedding_info
     emb = EmbeddingModel(
-        model_name=config.embedding.model,
-        backend=config.embedding.backend,
+        model_name=emb_info.get("model", config.embedding.model),
+        backend=emb_info.get("backend", config.embedding.backend),
     )
 
     results = retrieve(query, store, index, emb, k=k)
@@ -247,14 +295,14 @@ def search(query: str, k: int):
 
 @main.command()
 @click.option("--db", type=click.Path(), default=None)
-def dedup(db: str | None):
+@click.pass_context
+def dedup(ctx, db: str | None):
     """Run cross-source deduplication on the skill store."""
-    from skill_mcp.config import load_config
     from skill_mcp.dedup import deduplicate_skills
     from skill_mcp.store import SkillStore
 
     if db is None:
-        config = load_config()
+        config = _load_config_from_ctx(ctx)
         db = str(config.db_path)
 
     store = SkillStore(db)

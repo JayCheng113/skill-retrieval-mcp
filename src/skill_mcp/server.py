@@ -174,7 +174,7 @@ def _handle_list_categories() -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(counts, ensure_ascii=False))]
 
 
-async def run_server(config_path: Path | None = None) -> None:
+async def run_server(config_path: Path | None = None, transport: str = "stdio") -> None:
     """Start the MCP server."""
     global _store, _index, _embedding
 
@@ -191,10 +191,35 @@ async def run_server(config_path: Path | None = None) -> None:
     index_dir = config.index_dir
     if (index_dir / "index.faiss").exists():
         _index = SkillIndex.load(index_dir)
-        _embedding = EmbeddingModel(
-            model_name=config.embedding.model,
-            backend=config.embedding.backend,
-        )
+        # Use the embedding backend/model that was used to build the index
+        emb_info = _index.embedding_info
+        backend = emb_info.get("backend", config.embedding.backend)
+        model = emb_info.get("model", config.embedding.model)
+        _embedding = EmbeddingModel(model_name=model, backend=backend)
 
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+    if transport == "sse":
+        try:
+            from starlette.applications import Starlette
+            from starlette.routing import Route
+            from mcp.server.sse import SseServerTransport
+            import uvicorn
+        except ImportError:
+            raise SystemExit(
+                "SSE transport requires extra dependencies. Install with:\n"
+                "  pip install skill-retrieval-mcp[sse]"
+            )
+
+        sse = SseServerTransport("/messages")
+
+        async def handle_sse(request):
+            async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+                await server.run(streams[0], streams[1], server.create_initialization_options())
+
+        app = Starlette(routes=[
+            Route("/sse", endpoint=handle_sse),
+            Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
+        ])
+        uvicorn.run(app, host="127.0.0.1", port=8000)
+    else:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
