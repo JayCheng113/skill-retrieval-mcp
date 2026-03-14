@@ -223,7 +223,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 
 The server passes an `instructions` string during MCP initialization. This tells the agent what the knowledge base contains and how tools relate to each other (search → get_skill workflow), so the agent can decide when to search based on the task — no extra configuration or agent-specific instruction files needed.
 
-This is set via `Server(name, instructions=...)` in `server.py`. The instructions describe the knowledge base content, the search → get_skill workflow, and proactive trigger conditions (unfamiliar technologies, config files, best practices). Tool descriptions list concrete scenarios to help agents recognize when to search autonomously.
+This is set via `Server(name, instructions=...)` in `server.py`. The instructions emphasize the **breadth** of the knowledge base (virtually every technical domain) and the **low cost** of searching (< 5ms, zero API calls) to encourage agents to search proactively. The design principle: rather than listing specific trigger scenarios (which limits when agents search), communicate that skills exist for nearly any task and searching is essentially free.
 
 ## MCP Tool Interface
 
@@ -234,7 +234,7 @@ This is set via `Server(name, instructions=...)` in `server.py`. The instruction
 → [{"id": "a1b2", "name": "...", "description": "...", "score": 0.81, "category": "...", "tags": [...]}]
 ```
 
-Semantic search. Returns summaries only (no `instructions`) to save context tokens. Tool description lists concrete trigger scenarios (config files, new frameworks, design patterns, debugging, "how to" questions) so agents recognize when to search autonomously.
+Semantic search. Returns summaries only (no `instructions`) to save context tokens. Tool description emphasizes domain breadth and low search cost (< 5ms) to encourage agents to search proactively for any task.
 
 ### get_skill
 

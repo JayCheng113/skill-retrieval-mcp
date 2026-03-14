@@ -22,13 +22,13 @@ logger = logging.getLogger("skill_mcp")
 server = Server(
     "skill-retrieval",
     instructions=(
-        "A knowledge base of 89K+ skills is available — covering tools, frameworks, "
-        "languages, DevOps, cloud, ML, and more. Each skill contains a structured "
-        "how-to guide with best practices and step-by-step instructions. "
+        "A knowledge base of 89K+ skills is available — covering virtually every "
+        "technical domain: programming, DevOps, cloud, ML, databases, security, "
+        "documentation, API design, testing, project management, and more. "
+        "Each skill is a structured best-practice guide. "
         "Workflow: search_skills (semantic) or keyword_search (exact terms) → "
-        "review summaries → get_skill to fetch full step-by-step instructions. "
-        "Search proactively when encountering unfamiliar technologies, "
-        "before writing infrastructure or config files, or when best practices matter."
+        "review summaries → get_skill to fetch full instructions. "
+        "Search is < 5ms with zero API calls — when in doubt, search."
     ),
 )
 
@@ -44,12 +44,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_skills",
             description=(
-                "Search 89K+ technical skills by semantic similarity. "
-                "Use this when you're about to write configuration files "
-                "(Dockerfile, CI/CD yaml, k8s manifests, Terraform, nginx, etc.), "
-                "set up a new tool or framework, implement a design pattern, "
-                "debug an unfamiliar error, or need best practices for a specific technology. "
-                "Also use when the user asks 'how to', 'best way to', or 'help me with'. "
+                "Search 89K+ skills covering virtually every technical domain — "
+                "programming, DevOps, cloud, ML, databases, security, documentation, "
+                "API design, testing, project management, and more. "
+                "Each skill is a structured best-practice guide. "
+                "Search is < 5ms with zero API calls — when in doubt, search. "
                 "Returns summaries only — call get_skill for full instructions."
             ),
             inputSchema={

@@ -123,8 +123,8 @@ class TestToolDescriptions:
 
     def test_search_skills_has_behavioral_trigger(self, tools):
         desc = _desc(tools, "search_skills")
-        # Must tell agent when to use it
-        assert "use this" in desc.lower()
+        # Must encourage proactive searching (breadth + low cost)
+        assert "when in doubt" in desc.lower()
         # Must reference the follow-up tool
         assert "get_skill" in desc
 
