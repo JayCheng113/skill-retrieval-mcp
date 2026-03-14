@@ -211,7 +211,7 @@ def _rebuild_fts(db_path: Path) -> None:
 
 
 def _pull_index(config) -> None:
-    """Download pre-built index and check consistency with store."""
+    """Download pre-built index matching the configured embedding backend."""
     import shutil
 
     from skill_mcp.hub import download_index
@@ -224,27 +224,30 @@ def _pull_index(config) -> None:
     except FileNotFoundError as e:
         click.echo(str(e))
         return
+
+    # Verify downloaded index matches expected embedding
+    with open(index_files["meta"]) as f:
+        meta = json.load(f)
+    dl_emb = meta.get("embedding", {})
+    dl_backend = dl_emb.get("backend", "")
+    dl_model = dl_emb.get("model", "")
+    if dl_backend and dl_backend != backend:
+        click.echo(
+            f"WARNING: downloaded index uses {dl_backend}/{dl_model} "
+            f"but your config expects {backend}/{model}.\n"
+            f"Run `skill-mcp build-index` to build a compatible index locally."
+        )
+        return
+
     index_dir = config.index_dir
     index_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(index_files["faiss"], index_dir / "index.faiss")
     shutil.copy2(index_files["meta"], index_dir / "skill_ids.json")
 
-    with open(index_dir / "skill_ids.json") as f:
-        meta = json.load(f)
     index_count = len(meta.get("skill_ids", []))
-    emb = meta.get("embedding", {})
-    backend = emb.get("backend", "unknown")
-    model = emb.get("model", "unknown")
-    click.echo(f"Index: {index_count:,} vectors ({backend}/{model})")
+    click.echo(f"Index: {index_count:,} vectors ({dl_backend}/{dl_model})")
 
-    # Sync config with index embedding settings
-    if emb:
-        from skill_mcp.config import save_config
-        config.embedding.backend = backend
-        config.embedding.model = model
-        save_config(config)
-
-    # Warn if store has skills not covered by the index
+    # Check if store has skills not covered by the index
     from skill_mcp.store import SkillStore
     if config.db_path.exists():
         store = SkillStore(config.db_path, readonly=True)
@@ -252,7 +255,7 @@ def _pull_index(config) -> None:
         store.close()
         if db_count > index_count:
             click.echo(f"  Note: store has {db_count - index_count:,} skills not in index.")
-            click.echo(f"  Run `skill-mcp build-index --force` to include all.")
+            click.echo(f"  Run `skill-mcp build-index` to include all.")
 
 
 @main.command("import")
@@ -297,8 +300,8 @@ def import_skills(ctx, source: str, source_path: str, db: str | None):
 
 
 @main.command("build-index")
-@click.option("--backend", default="sentence-transformers", help="Embedding backend")
-@click.option("--model", default=None, help="Embedding model name")
+@click.option("--backend", default=None, help="Embedding backend (default: from config)")
+@click.option("--model", default=None, help="Embedding model name (default: from config)")
 @click.option("--db", type=click.Path(), default=None)
 @click.option("--output", type=click.Path(), default=None, help="Index output directory")
 @click.option("--force", is_flag=True, help="Overwrite existing index")
@@ -315,6 +318,8 @@ def build_index(ctx, backend: str, model: str | None, db: str | None, output: st
         db = str(config.db_path)
     if output is None:
         output = str(config.index_dir)
+    if backend is None:
+        backend = config.embedding.backend
     if model is None:
         model = config.embedding.model
 
