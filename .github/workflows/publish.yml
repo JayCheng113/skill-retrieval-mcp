@@ -6,11 +6,14 @@ on:
 
 permissions:
   id-token: write
+  contents: read
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi
+      url: https://pypi.org/p/skill-retrieval-mcp
 
     steps:
       - uses: actions/checkout@v4
