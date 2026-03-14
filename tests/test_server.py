@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 import skill_mcp.server as srv
 from skill_mcp.embeddings import EmbeddingModel
 from skill_mcp.index import SkillIndex
@@ -102,9 +104,6 @@ def test_search_skills_no_index():
 
 
 # ── Tool description tests ──────────────────────────────────────────
-
-
-import pytest
 
 
 @pytest.fixture()
