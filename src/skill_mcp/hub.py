@@ -43,7 +43,7 @@ def download_index(
     """Download pre-built FAISS index for a specific embedding backend/model.
 
     Files are stored under indices/{backend}/{model}/ on HuggingFace.
-    Falls back to indices/ (flat layout) for backward compatibility.
+    Raises if the requested backend/model is not available.
     """
     prefix = f"indices/{backend}/{model}"
     try:
@@ -52,8 +52,7 @@ def download_index(
             "meta": _hf_download(f"{prefix}/skill_ids.json"),
         }
     except Exception:
-        # Fallback: try flat layout (legacy)
-        return {
-            "faiss": _hf_download("indices/index.faiss"),
-            "meta": _hf_download("indices/skill_ids.json"),
-        }
+        raise FileNotFoundError(
+            f"No pre-built index for {backend}/{model} on HuggingFace.\n"
+            f"Run `skill-mcp build-index --backend {backend}` to build locally."
+        )

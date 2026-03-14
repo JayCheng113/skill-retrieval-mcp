@@ -862,12 +862,12 @@ class TestPull:
         assert "Merged" not in result.output
 
     def test_pull_merge_warns_stale_index(self, runner, populated_data_dir, tmp_path, monkeypatch):
-        """Pull with existing index should warn about staleness."""
+        """Pull with existing index should prompt to update."""
         fake_db = _create_fake_hf_db(tmp_path)
         self._mock_download(fake_db, monkeypatch)
         result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "pull"])
         assert result.exit_code == 0
-        assert "stale" in result.output.lower()
+        assert "build-index" in result.output
 
     def test_pull_replace_clears_stale_index(self, runner, populated_data_dir, tmp_path, monkeypatch):
         """Pull --replace should remove the old index."""

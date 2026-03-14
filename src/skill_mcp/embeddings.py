@@ -20,10 +20,16 @@ class EmbeddingModel:
         self._dimension: int | None = None
 
         if backend == "openai":
-            import openai
+            try:
+                import openai
+            except ImportError:
+                raise SystemExit("OpenAI backend requires: pip install skill-retrieval-mcp[openai]")
             self._client = openai.OpenAI()
         elif backend == "sentence-transformers":
-            from sentence_transformers import SentenceTransformer
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError:
+                raise SystemExit("sentence-transformers backend requires: pip install skill-retrieval-mcp[local]")
             self._model = SentenceTransformer(model_name)
             self._dimension = self._model.get_sentence_embedding_dimension()
         elif backend == "ollama":

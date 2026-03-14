@@ -174,7 +174,7 @@ def pull(ctx, replace: bool, include_index: bool):
     if include_index:
         _pull_index(config)
     elif index_path.exists() and not replace:
-        click.echo("Note: index may be stale. Run `skill-mcp build-index --force` to rebuild.")
+        click.echo("Note: run `skill-mcp build-index` to update the index.")
     else:
         if replace and index_path.exists():
             # Clean stale index after --replace
@@ -219,7 +219,11 @@ def _pull_index(config) -> None:
     backend = config.embedding.backend
     model = config.embedding.model
     click.echo(f"Downloading pre-built index ({backend}/{model})...")
-    index_files = download_index(backend=backend, model=model)
+    try:
+        index_files = download_index(backend=backend, model=model)
+    except FileNotFoundError as e:
+        click.echo(str(e))
+        return
     index_dir = config.index_dir
     index_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(index_files["faiss"], index_dir / "index.faiss")
@@ -407,7 +411,7 @@ def status(ctx):
         index_count = len(meta.get("skill_ids", []))
         click.echo(f"Index: {index_count} skills ({index_path})")
         if db_count > 0 and index_count != db_count:
-            click.echo(f"  WARNING: index ({index_count}) != store ({db_count}). Run `skill-mcp build-index --force`.")
+            click.echo(f"  WARNING: index ({index_count}) != store ({db_count}). Run `skill-mcp build-index`.")
     else:
         click.echo("Index: not built")
 
