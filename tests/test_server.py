@@ -99,3 +99,60 @@ def test_search_skills_no_index():
     assert "error" in data
     assert "build-index" in data["error"]
     store.close()
+
+
+# ── Tool description tests ──────────────────────────────────────────
+
+
+import pytest
+
+
+@pytest.fixture()
+def tools():
+    """Fetch the tool list once."""
+    import asyncio
+
+    return asyncio.get_event_loop().run_until_complete(srv.list_tools())
+
+
+def _desc(tools, name: str) -> str:
+    return next(t.description for t in tools if t.name == name)
+
+
+class TestToolDescriptions:
+    """Tool descriptions must guide agents on WHEN to call each tool."""
+
+    def test_search_skills_has_behavioral_trigger(self, tools):
+        desc = _desc(tools, "search_skills")
+        # Must tell agent when to use it
+        assert "use this" in desc.lower()
+        # Must reference the follow-up tool
+        assert "get_skill" in desc
+
+    def test_search_skills_no_instructions_in_results(self, tools):
+        desc = _desc(tools, "search_skills")
+        # Must clarify that search returns summaries only
+        assert "summar" in desc.lower()
+
+    def test_get_skill_references_workflow(self, tools):
+        desc = _desc(tools, "get_skill")
+        # Must mention it follows search
+        assert "search_skills" in desc or "keyword_search" in desc
+
+    def test_keyword_search_differentiates_from_semantic(self, tools):
+        desc = _desc(tools, "keyword_search")
+        # Must explain when to prefer keyword over semantic
+        assert "keyword" in desc.lower() or "specific terms" in desc.lower()
+        # Must also reference get_skill
+        assert "get_skill" in desc
+
+    def test_list_categories_has_use_case(self, tools):
+        desc = _desc(tools, "list_categories")
+        # Must not be a bare "list categories" — should say why
+        assert "discover" in desc.lower() or "browse" in desc.lower()
+
+    def test_all_descriptions_are_nonempty(self, tools):
+        for tool in tools:
+            assert tool.description and len(tool.description) > 20, (
+                f"Tool '{tool.name}' has a too-short or empty description"
+            )
