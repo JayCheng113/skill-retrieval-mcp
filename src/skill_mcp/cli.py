@@ -99,17 +99,28 @@ def _try_register_mcp(data_path: Path) -> None:
         "args": ["serve"],
     }
 
-    # Claude Code
-    claude_settings = Path("~/.claude/settings.json").expanduser()
-    if claude_settings.parent.exists():
-        if click.confirm("Register MCP server with Claude Code?", default=True):
-            _register_mcp_json(claude_settings, "skill-retrieval", mcp_entry)
+    # Claude Code — project-level .mcp.json
+    claude_mcp = Path(".mcp.json")
+    if click.confirm("Register with Claude Code (.mcp.json)?", default=True):
+        _register_mcp_json(claude_mcp, "skill-retrieval", mcp_entry)
 
-    # Cursor
-    cursor_mcp = Path(".cursor/mcp.json")
-    if cursor_mcp.parent.exists():
-        if click.confirm("Register MCP server with Cursor?", default=True):
-            _register_mcp_json(cursor_mcp, "skill-retrieval", mcp_entry)
+    # Gemini CLI — ~/.gemini/settings.json
+    gemini_dir = Path("~/.gemini").expanduser()
+    if gemini_dir.exists():
+        if click.confirm("Register with Gemini CLI (~/.gemini/settings.json)?", default=True):
+            _register_mcp_json(gemini_dir / "settings.json", "skill-retrieval", mcp_entry)
+
+    # Cursor — .cursor/mcp.json
+    cursor_dir = Path(".cursor")
+    if cursor_dir.exists():
+        if click.confirm("Register with Cursor (.cursor/mcp.json)?", default=True):
+            _register_mcp_json(cursor_dir / "mcp.json", "skill-retrieval", mcp_entry)
+
+    # Codex CLI — ~/.codex/config.toml
+    codex_config = Path("~/.codex/config.toml").expanduser()
+    if codex_config.parent.exists():
+        if click.confirm("Register with Codex CLI (~/.codex/config.toml)?", default=True):
+            _register_codex_toml(codex_config, "skill-retrieval", mcp_entry)
 
 
 def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
@@ -128,6 +139,28 @@ def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
+    click.echo(f"  Registered in {path}")
+
+
+def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
+    """Add an MCP server entry to Codex CLI's TOML config."""
+    import tomllib
+
+    existing = ""
+    if path.exists():
+        existing = path.read_text()
+        # Check if already registered
+        try:
+            data = tomllib.loads(existing)
+            if name in data.get("mcp_servers", {}):
+                click.echo(f"  Already registered in {path}")
+                return
+        except Exception:
+            pass
+
+    section = f'\n[mcp_servers.{name}]\ncommand = "{entry["command"]}"\nargs = {json.dumps(entry["args"])}\n'
+    with open(path, "a") as f:
+        f.write(section)
     click.echo(f"  Registered in {path}")
 
 

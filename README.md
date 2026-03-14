@@ -41,11 +41,14 @@ No local computation needed. If you prefer to build the index yourself, omit `--
 skill-mcp init    # auto-detects Claude Code and Cursor, prompts to register
 ```
 
-Or add manually to your agent's MCP config:
+Or register manually:
 
-```json
-{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}
-```
+| Agent | Config file | Format |
+|-------|------------|--------|
+| **Claude Code** | `.mcp.json` (project) | `{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}` |
+| **Gemini CLI** | `~/.gemini/settings.json` | same JSON as above |
+| **Cursor** | `.cursor/mcp.json` | same JSON as above |
+| **Codex CLI** | `~/.codex/config.toml` | `[mcp_servers.skill-retrieval]`<br>`command = "skill-mcp"`<br>`args = ["serve"]` |
 
 That's it. Your agent now has access to 89K searchable skills.
 
