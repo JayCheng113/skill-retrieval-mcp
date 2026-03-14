@@ -32,7 +32,12 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="search_skills",
-            description="Search for relevant skills by semantic similarity. Returns top-k matching skills with scores. Requires a pre-built vector index (run `skill-mcp build-index` first).",
+            description=(
+                "Search a knowledge base of 89K+ skills (how-to guides, best practices, technical workflows) "
+                "by semantic similarity. Use this BEFORE starting any task — when the user asks how to do something, "
+                "needs guidance on tools/frameworks/languages, or when you are unsure about the best approach. "
+                "Returns summaries only; call get_skill for full instructions."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -51,7 +56,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_skill",
-            description="Get the full details of a skill by its ID, including complete instructions.",
+            description=(
+                "Fetch the full instructions for a skill by ID. "
+                "Call this after search_skills or keyword_search to retrieve the detailed guide "
+                "for a skill you want to apply."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -65,7 +74,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="keyword_search",
-            description="Search for skills using keyword matching (FTS5). Works even without a vector index.",
+            description=(
+                "Search skills by keyword matching. Use when you have specific terms "
+                "(tool names, error messages, technology names) rather than a general description. "
+                "Works without a vector index. Returns summaries; call get_skill for full instructions."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -84,7 +97,11 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="list_categories",
-            description="List all skill categories and their counts.",
+            description=(
+                "List all skill categories and their counts. "
+                "Use to discover what domains are covered (e.g., cloud, ml, devtools, linux) "
+                "or to help the user browse available skills."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {},
