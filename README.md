@@ -15,12 +15,11 @@ Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any M
 
 ## Quick Start
 
-**3 commands to go from zero to 89K searchable skills:**
+**2 commands to go from zero to 89K searchable skills:**
 
 ```bash
 pip install "skill-retrieval-mcp[local,hf]"
-skill-mcp pull                    # download 89K pre-built skills from HuggingFace
-skill-mcp build-index             # build vector index locally (~2 min)
+skill-mcp pull --include-index    # download 89K skills + pre-built vector index
 ```
 
 That's it. Register with your agent and start using:
@@ -35,6 +34,8 @@ skill-mcp init
 ```json
 {"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}
 ```
+
+> `--include-index` downloads a pre-built vector index so you skip the local embedding step entirely. Without it, run `skill-mcp build-index` to build locally (~7 min on CPU).
 
 ## How Your Agent Uses It
 
@@ -106,19 +107,28 @@ Deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILL
 
 Default: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, local, free, no API key).
 
+| Backend | Install | Pre-built index | Requires |
+|---------|---------|-----------------|----------|
+| `sentence-transformers` | `pip install skill-retrieval-mcp[local]` | available via `--include-index` (137MB) | Nothing |
+| `openai` | `pip install skill-retrieval-mcp[openai]` | available via `--include-index` (1.1GB) | `OPENAI_API_KEY` |
+| `ollama` | `pip install skill-retrieval-mcp[ollama]` | not available, build locally | Ollama running |
+
+`pull --include-index` downloads the pre-built index matching your configured backend. To switch backends:
+
 ```bash
-skill-mcp build-index                                              # default (local)
-skill-mcp build-index --backend openai --model text-embedding-3-large   # highest quality
-skill-mcp build-index --backend ollama --model nomic-embed-text    # self-hosted
+# Option A: build locally with a different backend
+skill-mcp build-index --backend openai --model text-embedding-3-large --force
+
+# Option B: download pre-built index for a different backend
+# 1. Update config (~/.skill-mcp/config.yaml):
+#      embedding:
+#        backend: openai
+#        model: text-embedding-3-large
+# 2. Then pull the matching index:
+skill-mcp pull --include-index
 ```
 
-| Backend | Install | Requires |
-|---------|---------|----------|
-| `sentence-transformers` | `pip install skill-retrieval-mcp[local]` | Nothing |
-| `openai` | `pip install skill-retrieval-mcp[openai]` | `OPENAI_API_KEY` |
-| `ollama` | `pip install skill-retrieval-mcp[ollama]` | Ollama running locally |
-
-Switching backends requires `--force` to rebuild the index.
+One index = one embedding model. All vectors must come from the same model. `build-index` detects model changes and requires `--force` to rebuild.
 
 ## CLI Reference
 
