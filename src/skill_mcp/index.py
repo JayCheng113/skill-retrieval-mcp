@@ -28,17 +28,60 @@ class SkillIndex:
         batch_size: int = 64,
         show_progress: bool = True,
     ) -> None:
-        """Build index from all skills in store."""
-        from tqdm import tqdm
-
+        """Build index from all skills in store (full rebuild)."""
         skills = store.get_all()
         if not skills:
             return
-
         texts = [s.to_embedding_text() for s in skills]
         ids = [s.id for s in skills]
+        vectors = self._encode_batch(texts, embedding_model, batch_size, show_progress)
+        self.index.add(vectors)
+        self.skill_ids = ids
 
-        # Encode in batches with progress bar
+    def update(
+        self,
+        store: SkillStore,
+        embedding_model: EmbeddingModel,
+        batch_size: int = 64,
+        show_progress: bool = True,
+    ) -> int:
+        """Incrementally add new skills to existing index.
+
+        Returns the number of new skills added, or -1 if a full rebuild
+        is required (e.g. skills were deleted from the store).
+        """
+        store_ids = store.all_ids()
+        indexed_ids = set(self.skill_ids)
+
+        # Detect deletions — FAISS doesn't support removal, need full rebuild
+        if not indexed_ids.issubset(store_ids):
+            return -1
+
+        new_ids = store_ids - indexed_ids
+        if not new_ids:
+            return 0
+
+        new_skills = [store.get_skill(sid) for sid in new_ids]
+        new_skills = [s for s in new_skills if s is not None]
+        if not new_skills:
+            return 0
+
+        texts = [s.to_embedding_text() for s in new_skills]
+        vectors = self._encode_batch(texts, embedding_model, batch_size, show_progress)
+        self.index.add(vectors)
+        self.skill_ids.extend([s.id for s in new_skills])
+        return len(new_skills)
+
+    def _encode_batch(
+        self,
+        texts: list[str],
+        embedding_model: EmbeddingModel,
+        batch_size: int,
+        show_progress: bool,
+    ) -> np.ndarray:
+        """Encode texts, normalize, return float32 array ready for FAISS."""
+        from tqdm import tqdm
+
         all_vectors = []
         iterator = range(0, len(texts), batch_size)
         if show_progress and len(texts) > batch_size:
@@ -51,10 +94,7 @@ class SkillIndex:
         vectors = np.vstack(all_vectors)
         norms = np.linalg.norm(vectors, axis=1, keepdims=True)
         norms = np.maximum(norms, 1e-10)
-        vectors = vectors / norms
-
-        self.index.add(vectors.astype(np.float32))
-        self.skill_ids = ids
+        return (vectors / norms).astype(np.float32)
 
     def search(
         self, query_vector: np.ndarray, k: int = 5

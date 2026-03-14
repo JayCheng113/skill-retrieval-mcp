@@ -216,8 +216,10 @@ def _pull_index(config) -> None:
 
     from skill_mcp.hub import download_index
 
-    click.echo("Downloading pre-built index...")
-    index_files = download_index()
+    backend = config.embedding.backend
+    model = config.embedding.model
+    click.echo(f"Downloading pre-built index ({backend}/{model})...")
+    index_files = download_index(backend=backend, model=model)
     index_dir = config.index_dir
     index_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(index_files["faiss"], index_dir / "index.faiss")
@@ -286,7 +288,7 @@ def import_skills(ctx, source: str, source_path: str, db: str | None):
     click.echo(f"Imported: {stats.added} added, {stats.replaced} replaced, {stats.skipped_duplicate} duplicates")
     click.echo(f"Store now has {store.count()} skills")
     if (stats.added > 0 or stats.replaced > 0) and (config.index_dir / "index.faiss").exists():
-        click.echo("Note: index is now stale. Run `skill-mcp build-index --force` to rebuild.")
+        click.echo("Note: run `skill-mcp build-index` to add new skills to the index.")
     store.close()
 
 
@@ -313,16 +315,38 @@ def build_index(ctx, backend: str, model: str | None, db: str | None, output: st
         model = config.embedding.model
 
     output_path = Path(output)
-    if (output_path / "index.faiss").exists() and not force:
-        click.echo(f"Index already exists at {output_path}. Use --force to overwrite.")
-        return
-
     store = SkillStore(db)
     skill_count = store.count()
     if skill_count == 0:
         click.echo("No skills in store. Import skills first.")
         store.close()
         return
+
+    existing_index = output_path / "index.faiss"
+
+    # Try incremental update if index exists and --force not set
+    if existing_index.exists() and not force:
+        index = SkillIndex.load(output_path)
+        emb_info = index.embedding_info
+        if emb_info.get("backend") != backend or emb_info.get("model") != model:
+            click.echo(f"Embedding model changed ({emb_info.get('backend')}/{emb_info.get('model')} -> {backend}/{model}).")
+            click.echo("Use --force to rebuild with the new model.")
+            store.close()
+            return
+
+        emb = EmbeddingModel(model_name=model, backend=backend)
+        added = index.update(store, emb)
+        if added == 0:
+            click.echo(f"Index is up to date ({len(index.skill_ids)} skills).")
+            store.close()
+            return
+        if added > 0:
+            index.save(output_path)
+            click.echo(f"Incremental update: added {added} skills (total {len(index.skill_ids)}).")
+            store.close()
+            return
+        # added == -1: deletions detected, fall through to full rebuild
+        click.echo("Skills were removed from store. Rebuilding full index...")
 
     click.echo(f"Building index for {skill_count} skills with {backend}/{model}...")
     emb = EmbeddingModel(model_name=model, backend=backend)
@@ -331,13 +355,11 @@ def build_index(ctx, backend: str, model: str | None, db: str | None, output: st
     index.build(store, emb)
     index.save(output_path)
 
-    # Write the actual backend/model used back to config so serve uses the same
     config.embedding.backend = backend
     config.embedding.model = model
     save_config(config)
 
-    click.echo(f"Index built with {len(index.skill_ids)} skills, saved to {output_path}")
-    click.echo(f"Config updated: embedding.backend={backend}, embedding.model={model}")
+    click.echo(f"Index built: {len(index.skill_ids)} skills, saved to {output_path}")
     store.close()
 
 

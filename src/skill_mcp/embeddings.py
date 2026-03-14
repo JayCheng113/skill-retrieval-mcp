@@ -12,8 +12,8 @@ class EmbeddingModel:
 
     def __init__(
         self,
-        model_name: str = "text-embedding-3-large",
-        backend: str = "openai",
+        model_name: str = "all-MiniLM-L6-v2",
+        backend: str = "sentence-transformers",
     ) -> None:
         self.model_name = model_name
         self.backend = backend

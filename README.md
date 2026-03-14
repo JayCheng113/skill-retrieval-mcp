@@ -145,8 +145,8 @@ skill-mcp pull --replace
 # Import from a directory of SKILL.md files
 skill-mcp import --source directory --path ~/my-skills/
 
-# After adding custom skills, rebuild the index to include them
-skill-mcp build-index --force
+# build-index is incremental — only encodes your new skills
+skill-mcp build-index
 ```
 
 Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.

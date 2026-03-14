@@ -10,6 +10,10 @@ from pathlib import Path
 
 HF_REPO = "zcheng256/skillretrieval-data"
 
+# The default pre-built index on HuggingFace
+DEFAULT_INDEX_BACKEND = "sentence-transformers"
+DEFAULT_INDEX_MODEL = "all-MiniLM-L6-v2"
+
 
 def _hf_download(filename: str) -> Path:
     """Download a single file from HuggingFace Hub. Returns cached path."""
@@ -32,9 +36,24 @@ def download_skills_db() -> Path:
     return _hf_download("processed/skills.db")
 
 
-def download_index() -> dict[str, Path]:
-    """Download pre-built FAISS index. Returns paths to cached files."""
-    return {
-        "faiss": _hf_download("indices/index.faiss"),
-        "meta": _hf_download("indices/skill_ids.json"),
-    }
+def download_index(
+    backend: str = DEFAULT_INDEX_BACKEND,
+    model: str = DEFAULT_INDEX_MODEL,
+) -> dict[str, Path]:
+    """Download pre-built FAISS index for a specific embedding backend/model.
+
+    Files are stored under indices/{backend}/{model}/ on HuggingFace.
+    Falls back to indices/ (flat layout) for backward compatibility.
+    """
+    prefix = f"indices/{backend}/{model}"
+    try:
+        return {
+            "faiss": _hf_download(f"{prefix}/index.faiss"),
+            "meta": _hf_download(f"{prefix}/skill_ids.json"),
+        }
+    except Exception:
+        # Fallback: try flat layout (legacy)
+        return {
+            "faiss": _hf_download("indices/index.faiss"),
+            "meta": _hf_download("indices/skill_ids.json"),
+        }

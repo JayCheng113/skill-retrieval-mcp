@@ -118,7 +118,7 @@ class TestFullWorkflow:
             ["--data-dir", str(populated_data_dir), "import", "--source", "directory", "--path", str(new_skill_dir)],
         )
         assert result.exit_code == 0
-        assert "stale" in result.output.lower() or "rebuild" in result.output.lower()
+        assert "build-index" in result.output.lower()
 
     def test_build_index_mock(self, runner, data_dir, skills_dir):
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
@@ -131,17 +131,18 @@ class TestFullWorkflow:
             ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
         )
         assert result.exit_code == 0
-        assert "Index built with 3 skills" in result.output
+        assert "Index built: 3 skills" in result.output
         assert (data_dir / "index" / "index.faiss").exists()
         assert (data_dir / "index" / "skill_ids.json").exists()
 
-    def test_build_index_refuses_overwrite(self, runner, populated_data_dir):
+    def test_build_index_up_to_date(self, runner, populated_data_dir):
+        """build-index with no changes should report up to date."""
         result = runner.invoke(
             main,
             ["--data-dir", str(populated_data_dir), "build-index", "--backend", "mock"],
         )
         assert result.exit_code == 0
-        assert "--force" in result.output
+        assert "up to date" in result.output
 
     def test_build_index_force_overwrites(self, runner, populated_data_dir):
         result = runner.invoke(
@@ -546,6 +547,87 @@ class TestIndexMetadata:
         loaded = SkillIndex.load(tmp_path / "idx")
         assert loaded.embedding_info == {}
         store.close()
+
+    def test_incremental_update_adds_new(self):
+        """update() should encode only new skills."""
+        store = SkillStore()
+        s1 = Skill(name="s1", description="d", instructions="content 1", source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+        assert index.index.ntotal == 1
+
+        # Add a second skill
+        s2 = Skill(name="s2", description="d", instructions="content 2", source=SkillSource.COMMUNITY)
+        store.add_skill(s2)
+
+        added = index.update(store, emb)
+        assert added == 1
+        assert index.index.ntotal == 2
+        assert s2.id in index.skill_ids
+        store.close()
+
+    def test_incremental_update_noop(self):
+        """update() with no new skills returns 0."""
+        store = SkillStore()
+        store.add_skill(Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY))
+
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+
+        assert index.update(store, emb) == 0
+        store.close()
+
+    def test_incremental_update_detects_deletion(self):
+        """update() returns -1 when skills were deleted (needs full rebuild)."""
+        store = SkillStore()
+        s1 = Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY)
+        s2 = Skill(name="s2", description="d", instructions="c2", source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+        store.add_skill(s2)
+
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+        assert index.index.ntotal == 2
+
+        # Delete one skill from store
+        store.delete_skill(s2.id)
+        assert index.update(store, emb) == -1
+        store.close()
+
+    def test_build_index_incremental_via_cli(self, runner, populated_data_dir, tmp_path):
+        """build-index after import should incrementally add new skills."""
+        # populated_data_dir has 3 skills + index
+        new_skill_dir = tmp_path / "extra"
+        d = new_skill_dir / "new-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "brand-new"\ndescription: "A new skill"\n---\n\nNew instructions.\n'
+        )
+        runner.invoke(
+            main,
+            ["--data-dir", str(populated_data_dir), "import", "--source", "directory", "--path", str(new_skill_dir)],
+        )
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(populated_data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "Incremental" in result.output
+        assert "added 1" in result.output
+
+    def test_build_index_model_change_requires_force(self, runner, populated_data_dir):
+        """build-index with different model should require --force."""
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(populated_data_dir), "build-index", "--backend", "mock", "--model", "different-model"],
+        )
+        assert result.exit_code == 0
+        assert "--force" in result.output
 
 
 # ---------------------------------------------------------------------------

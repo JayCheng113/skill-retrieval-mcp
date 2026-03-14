@@ -182,6 +182,12 @@ class SkillStore:
         for row in cur:
             yield self._row_to_skill(row)
 
+    def all_ids(self) -> set[str]:
+        """Return all skill IDs without loading full skill objects."""
+        cur = self._conn.cursor()
+        cur.execute("SELECT id FROM skills")
+        return {row[0] for row in cur.fetchall()}
+
     def count(self) -> int:
         cur = self._conn.cursor()
         cur.execute("SELECT COUNT(*) FROM skills")
