@@ -29,7 +29,9 @@ class EmbeddingModel:
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError:
-                raise SystemExit("sentence-transformers backend requires: pip install skill-retrieval-mcp[local]")
+                raise SystemExit(
+                    "sentence-transformers backend requires: pip install skill-retrieval-mcp[local]"
+                )
             self._model = SentenceTransformer(model_name)
             self._dimension = self._model.get_sentence_embedding_dimension()
         elif backend == "ollama":
@@ -59,14 +61,13 @@ class EmbeddingModel:
             return np.array(all_embeddings, dtype=np.float32)
 
         if self.backend == "sentence-transformers":
-            embeddings = self._model.encode(
-                texts, batch_size=batch_size, show_progress_bar=False
-            )
+            embeddings = self._model.encode(texts, batch_size=batch_size, show_progress_bar=False)
             return np.array(embeddings, dtype=np.float32)
 
         if self.backend == "ollama":
             all_embeddings: list[np.ndarray] = []
             import httpx
+
             for text in texts:
                 resp = httpx.post(
                     self._ollama_url,

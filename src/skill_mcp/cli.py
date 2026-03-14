@@ -10,11 +10,20 @@ import click
 
 
 @click.group()
-@click.option("--data-dir", "global_data_dir", default=None, envvar="SKILL_MCP_DATA_DIR",
-              help="Override data directory (default: ~/.skill-mcp, env: SKILL_MCP_DATA_DIR)")
-@click.option("--log-level", default=None, envvar="SKILL_MCP_LOG_LEVEL",
-              type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
-              help="Log level (default: WARNING, env: SKILL_MCP_LOG_LEVEL)")
+@click.option(
+    "--data-dir",
+    "global_data_dir",
+    default=None,
+    envvar="SKILL_MCP_DATA_DIR",
+    help="Override data directory (default: ~/.skill-mcp, env: SKILL_MCP_DATA_DIR)",
+)
+@click.option(
+    "--log-level",
+    default=None,
+    envvar="SKILL_MCP_LOG_LEVEL",
+    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+    help="Log level (default: WARNING, env: SKILL_MCP_LOG_LEVEL)",
+)
 @click.pass_context
 def main(ctx, global_data_dir: str | None, log_level: str | None):
     """skill-retrieval-mcp: RAG-based skill retrieval for AI agents."""
@@ -29,7 +38,7 @@ def main(ctx, global_data_dir: str | None, log_level: str | None):
         )
 
 
-def _load_config_from_ctx(ctx) -> "Config":
+def _load_config_from_ctx(ctx):
     """Load config, respecting the global --data-dir override."""
     from skill_mcp.config import load_config
 
@@ -149,6 +158,7 @@ def pull(ctx, replace: bool, include_index: bool):
     # Auto-init if needed
     if not data_dir.exists():
         from skill_mcp.config import Config, save_config
+
         data_dir.mkdir(parents=True, exist_ok=True)
         save_config(Config(data_dir=str(data_dir)))
         click.echo(f"Initialized {data_dir}")
@@ -176,7 +186,9 @@ def pull(ctx, replace: bool, include_index: bool):
         store = SkillStore(db_path)
         before = store.count()
         stats = store.merge_from(cached_db)
-        click.echo(f"Merged: {stats.added:,} new, {stats.replaced:,} upgraded, {stats.skipped_duplicate:,} unchanged")
+        click.echo(
+            f"Merged: {stats.added:,} new, {stats.replaced:,} upgraded, {stats.skipped_duplicate:,} unchanged"
+        )
         click.echo(f"Store: {before:,} -> {store.count():,} skills")
         store.close()
 
@@ -251,13 +263,14 @@ def _pull_index(config) -> None:
 
     # Check if store has skills not covered by the index
     from skill_mcp.store import SkillStore
+
     if config.db_path.exists():
         store = SkillStore(config.db_path, readonly=True)
         db_count = store.count()
         store.close()
         if db_count > index_count:
             click.echo(f"  Note: store has {db_count - index_count:,} skills not in index.")
-            click.echo(f"  Run `skill-mcp build-index` to include all.")
+            click.echo("  Run `skill-mcp build-index` to include all.")
 
 
 @main.command("import")
@@ -267,7 +280,9 @@ def _pull_index(config) -> None:
     required=True,
 )
 @click.option("--path", "source_path", type=click.Path(exists=True), required=True)
-@click.option("--db", type=click.Path(), default=None, help="Database path (default: ~/.skill-mcp/skills.db)")
+@click.option(
+    "--db", type=click.Path(), default=None, help="Database path (default: ~/.skill-mcp/skills.db)"
+)
 @click.pass_context
 def import_skills(ctx, source: str, source_path: str, db: str | None):
     """Import skills from a source into the store."""
@@ -282,19 +297,24 @@ def import_skills(ctx, source: str, source_path: str, db: str | None):
 
     if source == "directory":
         from skill_mcp.importers.directory import DirectoryImporter
+
         importer = DirectoryImporter()
     elif source == "langskills":
         from skill_mcp.importers.langskills import LangSkillsImporter
+
         importer = LangSkillsImporter()
     elif source == "anthropic":
         from skill_mcp.importers.anthropic import AnthropicImporter
+
         importer = AnthropicImporter()
     else:
         click.echo(f"Unknown source: {source}")
         return
 
     stats = importer.import_skills(path, store)
-    click.echo(f"Imported: {stats.added} added, {stats.replaced} replaced, {stats.skipped_duplicate} duplicates")
+    click.echo(
+        f"Imported: {stats.added} added, {stats.replaced} replaced, {stats.skipped_duplicate} duplicates"
+    )
     click.echo(f"Store now has {store.count()} skills")
     if (stats.added > 0 or stats.replaced > 0) and (config.index_dir / "index.faiss").exists():
         click.echo("Note: run `skill-mcp build-index` to add new skills to the index.")
@@ -308,7 +328,9 @@ def import_skills(ctx, source: str, source_path: str, db: str | None):
 @click.option("--output", type=click.Path(), default=None, help="Index output directory")
 @click.option("--force", is_flag=True, help="Overwrite existing index")
 @click.pass_context
-def build_index(ctx, backend: str, model: str | None, db: str | None, output: str | None, force: bool):
+def build_index(
+    ctx, backend: str, model: str | None, db: str | None, output: str | None, force: bool
+):
     """Build FAISS vector index from skill store."""
     from skill_mcp.config import save_config
     from skill_mcp.embeddings import EmbeddingModel
@@ -340,7 +362,9 @@ def build_index(ctx, backend: str, model: str | None, db: str | None, output: st
         index = SkillIndex.load(output_path)
         emb_info = index.embedding_info
         if emb_info.get("backend") != backend or emb_info.get("model") != model:
-            click.echo(f"Embedding model changed ({emb_info.get('backend')}/{emb_info.get('model')} -> {backend}/{model}).")
+            click.echo(
+                f"Embedding model changed ({emb_info.get('backend')}/{emb_info.get('model')} -> {backend}/{model})."
+            )
             click.echo("Use --force to rebuild with the new model.")
             store.close()
             return
@@ -402,12 +426,15 @@ def status(ctx):
     data_dir = config.resolved_data_dir
 
     click.echo(f"Data directory: {data_dir}")
-    click.echo(f"Config: {config.config_path} ({'exists' if config.config_path.exists() else 'missing (using defaults)'})")
+    click.echo(
+        f"Config: {config.config_path} ({'exists' if config.config_path.exists() else 'missing (using defaults)'})"
+    )
 
     db_path = config.db_path
     db_count = 0
     if db_path.exists():
         from skill_mcp.store import SkillStore
+
         store = SkillStore(db_path, readonly=True)
         db_count = store.count()
         click.echo(f"Skills: {db_count}")
@@ -426,7 +453,9 @@ def status(ctx):
         index_count = len(meta.get("skill_ids", []))
         click.echo(f"Index: {index_count} skills ({index_path})")
         if db_count > 0 and index_count != db_count:
-            click.echo(f"  WARNING: index ({index_count}) != store ({db_count}). Run `skill-mcp build-index`.")
+            click.echo(
+                f"  WARNING: index ({index_count}) != store ({db_count}). Run `skill-mcp build-index`."
+            )
     else:
         click.echo("Index: not built")
 

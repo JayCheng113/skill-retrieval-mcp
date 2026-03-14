@@ -13,8 +13,20 @@ def _setup_server():
     """Set up server state for testing."""
     store = SkillStore()
     skills = [
-        Skill(name="debug-memory", description="Debug memory leaks", instructions="Use profiler tools", source=SkillSource.COMMUNITY, category="debugging"),
-        Skill(name="write-tests", description="Write unit tests", instructions="Use pytest framework", source=SkillSource.COMMUNITY, category="testing"),
+        Skill(
+            name="debug-memory",
+            description="Debug memory leaks",
+            instructions="Use profiler tools",
+            source=SkillSource.COMMUNITY,
+            category="debugging",
+        ),
+        Skill(
+            name="write-tests",
+            description="Write unit tests",
+            instructions="Use pytest framework",
+            source=SkillSource.COMMUNITY,
+            category="testing",
+        ),
     ]
     store.add_skills(skills)
 

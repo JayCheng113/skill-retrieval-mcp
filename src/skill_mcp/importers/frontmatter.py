@@ -15,5 +15,5 @@ def split_frontmatter(text: str) -> tuple[str | None, str]:
     if end_idx == -1:
         return None, text
     frontmatter = stripped[3:end_idx].strip()
-    body = stripped[end_idx + 3:]
+    body = stripped[end_idx + 3 :]
     return frontmatter, body

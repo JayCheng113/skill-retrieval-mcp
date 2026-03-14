@@ -96,9 +96,7 @@ class SkillIndex:
         norms = np.maximum(norms, 1e-10)
         return (vectors / norms).astype(np.float32)
 
-    def search(
-        self, query_vector: np.ndarray, k: int = 5
-    ) -> list[tuple[str, float]]:
+    def search(self, query_vector: np.ndarray, k: int = 5) -> list[tuple[str, float]]:
         """Search for top-k similar skills. Returns list of (skill_id, score)."""
         qv = query_vector.astype(np.float32).reshape(1, -1)
         norm = np.linalg.norm(qv)

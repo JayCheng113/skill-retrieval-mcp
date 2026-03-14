@@ -7,7 +7,6 @@ plus edge cases discovered via thought experiments.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -98,7 +97,15 @@ class TestFullWorkflow:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         result = runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         assert result.exit_code == 0
         assert "3 added" in result.output
@@ -115,7 +122,15 @@ class TestFullWorkflow:
         )
         result = runner.invoke(
             main,
-            ["--data-dir", str(populated_data_dir), "import", "--source", "directory", "--path", str(new_skill_dir)],
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(new_skill_dir),
+            ],
         )
         assert result.exit_code == 0
         assert "build-index" in result.output.lower()
@@ -124,7 +139,15 @@ class TestFullWorkflow:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         result = runner.invoke(
             main,
@@ -184,7 +207,15 @@ class TestFullWorkflow:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         result = runner.invoke(
             main,
@@ -210,7 +241,15 @@ class TestFullWorkflow:
         )
         runner.invoke(
             main,
-            ["--data-dir", str(populated_data_dir), "import", "--source", "directory", "--path", str(new_skill_dir)],
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(new_skill_dir),
+            ],
         )
         result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "status"])
         assert result.exit_code == 0
@@ -245,7 +284,15 @@ class TestDataDirOverride:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         result = runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         assert result.exit_code == 0
         # Verify skills went to the custom data dir
@@ -261,7 +308,8 @@ class TestDataDirOverride:
 
     def test_envvar_override(self, runner, data_dir):
         result = runner.invoke(
-            main, ["init", "--no-register"],
+            main,
+            ["init", "--no-register"],
             env={"SKILL_MCP_DATA_DIR": str(data_dir)},
         )
         assert result.exit_code == 0
@@ -291,11 +339,27 @@ class TestConfig:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "build-index", "--backend", "mock", "--model", "test-model"],
+            [
+                "--data-dir",
+                str(data_dir),
+                "build-index",
+                "--backend",
+                "mock",
+                "--model",
+                "test-model",
+            ],
         )
         config = load_config(data_dir / "config.yaml")
         assert config.embedding.backend == "mock"
@@ -371,26 +435,43 @@ class TestDirectoryImporter:
 
 class TestSkill:
     def test_deterministic_id(self):
-        s1 = Skill(name="test", description="d", instructions="content", source=SkillSource.COMMUNITY)
-        s2 = Skill(name="test", description="d", instructions="content", source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="test", description="d", instructions="content", source=SkillSource.COMMUNITY
+        )
+        s2 = Skill(
+            name="test", description="d", instructions="content", source=SkillSource.COMMUNITY
+        )
         assert s1.id == s2.id
         assert s1.content_hash == s2.content_hash
 
     def test_different_content_different_hash(self):
-        s1 = Skill(name="test", description="d", instructions="content A", source=SkillSource.COMMUNITY)
-        s2 = Skill(name="test", description="d", instructions="content B", source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="test", description="d", instructions="content A", source=SkillSource.COMMUNITY
+        )
+        s2 = Skill(
+            name="test", description="d", instructions="content B", source=SkillSource.COMMUNITY
+        )
         assert s1.content_hash != s2.content_hash
 
     def test_to_embedding_text_truncation(self):
         long_instructions = "x" * 1000
-        s = Skill(name="test", description="desc", instructions=long_instructions, source=SkillSource.COMMUNITY)
+        s = Skill(
+            name="test",
+            description="desc",
+            instructions=long_instructions,
+            source=SkillSource.COMMUNITY,
+        )
         text = s.to_embedding_text()
         assert len(text) < 600  # name + desc + 500 chars max
 
     def test_serialization_roundtrip(self):
         s = Skill(
-            name="test", description="desc", instructions="content",
-            source=SkillSource.COMMUNITY, category="cat", tags=["a", "b"],
+            name="test",
+            description="desc",
+            instructions="content",
+            source=SkillSource.COMMUNITY,
+            category="cat",
+            tags=["a", "b"],
         )
         d = s.to_dict()
         s2 = Skill.from_dict(d)
@@ -422,8 +503,20 @@ class TestStoreEdgeCases:
 
     def test_get_by_category(self):
         store = SkillStore()
-        s1 = Skill(name="s1", description="d", instructions="c", source=SkillSource.COMMUNITY, category="cat-a")
-        s2 = Skill(name="s2", description="d", instructions="c2", source=SkillSource.COMMUNITY, category="cat-b")
+        s1 = Skill(
+            name="s1",
+            description="d",
+            instructions="c",
+            source=SkillSource.COMMUNITY,
+            category="cat-a",
+        )
+        s2 = Skill(
+            name="s2",
+            description="d",
+            instructions="c2",
+            source=SkillSource.COMMUNITY,
+            category="cat-b",
+        )
         store.add_skill(s1)
         store.add_skill(s2)
         results = store.get_by_category("cat-a")
@@ -435,7 +528,12 @@ class TestStoreEdgeCases:
         store = SkillStore()
         for i in range(5):
             store.add_skill(
-                Skill(name=f"s{i}", description="d", instructions=f"content {i}", source=SkillSource.COMMUNITY)
+                Skill(
+                    name=f"s{i}",
+                    description="d",
+                    instructions=f"content {i}",
+                    source=SkillSource.COMMUNITY,
+                )
             )
         items = list(store.iter_all())
         assert len(items) == 5
@@ -444,7 +542,12 @@ class TestStoreEdgeCases:
     def test_batch_import_stats(self):
         store = SkillStore()
         skills = [
-            Skill(name=f"s{i}", description="d", instructions=f"content {i}", source=SkillSource.COMMUNITY)
+            Skill(
+                name=f"s{i}",
+                description="d",
+                instructions=f"content {i}",
+                source=SkillSource.COMMUNITY,
+            )
             for i in range(3)
         ]
         stats = store.add_skills(skills)
@@ -467,19 +570,27 @@ class TestStoreEdgeCases:
         source_path = tmp_path / "source.db"
         source = SkillStore(source_path)
         for i in range(3):
-            source.add_skill(Skill(
-                name=f"src-{i}", description="d", instructions=f"src content {i}",
-                source=SkillSource.LANGSKILLS,
-            ))
+            source.add_skill(
+                Skill(
+                    name=f"src-{i}",
+                    description="d",
+                    instructions=f"src content {i}",
+                    source=SkillSource.LANGSKILLS,
+                )
+            )
         source.close()
 
         # Create target DB with one overlapping skill
         target_path = tmp_path / "target.db"
         target = SkillStore(target_path)
-        target.add_skill(Skill(
-            name="existing", description="d", instructions="unique content",
-            source=SkillSource.COMMUNITY,
-        ))
+        target.add_skill(
+            Skill(
+                name="existing",
+                description="d",
+                instructions="unique content",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         stats = target.merge_from(source_path)
         assert stats.added == 3
         assert target.count() == 4  # 1 existing + 3 merged
@@ -489,18 +600,26 @@ class TestStoreEdgeCases:
         """merge_from should skip duplicates based on content_hash."""
         source_path = tmp_path / "source.db"
         source = SkillStore(source_path)
-        source.add_skill(Skill(
-            name="shared", description="d", instructions="same content",
-            source=SkillSource.LANGSKILLS,
-        ))
+        source.add_skill(
+            Skill(
+                name="shared",
+                description="d",
+                instructions="same content",
+                source=SkillSource.LANGSKILLS,
+            )
+        )
         source.close()
 
         target_path = tmp_path / "target.db"
         target = SkillStore(target_path)
-        target.add_skill(Skill(
-            name="shared", description="d", instructions="same content",
-            source=SkillSource.COMMUNITY,  # higher priority
-        ))
+        target.add_skill(
+            Skill(
+                name="shared",
+                description="d",
+                instructions="same content",
+                source=SkillSource.COMMUNITY,  # higher priority
+            )
+        )
         stats = target.merge_from(source_path)
         assert stats.skipped_duplicate == 1
         assert target.count() == 1  # no duplicates
@@ -515,7 +634,9 @@ class TestStoreEdgeCases:
 class TestIndexMetadata:
     def test_embedding_info_saved(self, tmp_path):
         store = SkillStore()
-        store.add_skill(Skill(name="test", description="d", instructions="c", source=SkillSource.COMMUNITY))
+        store.add_skill(
+            Skill(name="test", description="d", instructions="c", source=SkillSource.COMMUNITY)
+        )
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
         index.embedding_info = {"backend": "mock", "model": "test-model"}
@@ -530,7 +651,9 @@ class TestIndexMetadata:
     def test_empty_embedding_info_on_old_index(self, tmp_path):
         """Indexes built before embedding_info should load with empty dict."""
         store = SkillStore()
-        store.add_skill(Skill(name="test", description="d", instructions="c", source=SkillSource.COMMUNITY))
+        store.add_skill(
+            Skill(name="test", description="d", instructions="c", source=SkillSource.COMMUNITY)
+        )
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
         index.build(store, emb)
@@ -551,7 +674,9 @@ class TestIndexMetadata:
     def test_incremental_update_adds_new(self):
         """update() should encode only new skills."""
         store = SkillStore()
-        s1 = Skill(name="s1", description="d", instructions="content 1", source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="s1", description="d", instructions="content 1", source=SkillSource.COMMUNITY
+        )
         store.add_skill(s1)
 
         emb = EmbeddingModel(backend="mock")
@@ -560,7 +685,9 @@ class TestIndexMetadata:
         assert index.index.ntotal == 1
 
         # Add a second skill
-        s2 = Skill(name="s2", description="d", instructions="content 2", source=SkillSource.COMMUNITY)
+        s2 = Skill(
+            name="s2", description="d", instructions="content 2", source=SkillSource.COMMUNITY
+        )
         store.add_skill(s2)
 
         added = index.update(store, emb)
@@ -572,7 +699,9 @@ class TestIndexMetadata:
     def test_incremental_update_noop(self):
         """update() with no new skills returns 0."""
         store = SkillStore()
-        store.add_skill(Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY))
+        store.add_skill(
+            Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY)
+        )
 
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
@@ -610,7 +739,15 @@ class TestIndexMetadata:
         )
         runner.invoke(
             main,
-            ["--data-dir", str(populated_data_dir), "import", "--source", "directory", "--path", str(new_skill_dir)],
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(new_skill_dir),
+            ],
         )
         result = runner.invoke(
             main,
@@ -624,7 +761,15 @@ class TestIndexMetadata:
         """build-index with different model should require --force."""
         result = runner.invoke(
             main,
-            ["--data-dir", str(populated_data_dir), "build-index", "--backend", "mock", "--model", "different-model"],
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "build-index",
+                "--backend",
+                "mock",
+                "--model",
+                "different-model",
+            ],
         )
         assert result.exit_code == 0
         assert "--force" in result.output
@@ -640,8 +785,18 @@ class TestDedup:
         from skill_mcp.dedup import deduplicate_skills
 
         skills = [
-            Skill(name="s1", description="d", instructions="same content", source=SkillSource.LANGSKILLS),
-            Skill(name="s2", description="d", instructions="same content", source=SkillSource.ANTHROPIC),
+            Skill(
+                name="s1",
+                description="d",
+                instructions="same content",
+                source=SkillSource.LANGSKILLS,
+            ),
+            Skill(
+                name="s2",
+                description="d",
+                instructions="same content",
+                source=SkillSource.ANTHROPIC,
+            ),
         ]
         result = deduplicate_skills(skills)
         assert len(result) == 1
@@ -651,8 +806,12 @@ class TestDedup:
         from skill_mcp.dedup import deduplicate_skills
 
         skills = [
-            Skill(name="s1", description="d", instructions="content A", source=SkillSource.COMMUNITY),
-            Skill(name="s2", description="d", instructions="content B", source=SkillSource.COMMUNITY),
+            Skill(
+                name="s1", description="d", instructions="content A", source=SkillSource.COMMUNITY
+            ),
+            Skill(
+                name="s2", description="d", instructions="content B", source=SkillSource.COMMUNITY
+            ),
         ]
         result = deduplicate_skills(skills)
         assert len(result) == 2
@@ -666,10 +825,23 @@ class TestDedup:
 class TestServerHandlers:
     def _setup(self):
         import skill_mcp.server as srv
+
         store = SkillStore()
         skills = [
-            Skill(name="debug-memory", description="Debug memory leaks", instructions="Use profiler tools", source=SkillSource.COMMUNITY, category="debugging"),
-            Skill(name="write-tests", description="Write unit tests", instructions="Use pytest framework", source=SkillSource.COMMUNITY, category="testing"),
+            Skill(
+                name="debug-memory",
+                description="Debug memory leaks",
+                instructions="Use profiler tools",
+                source=SkillSource.COMMUNITY,
+                category="debugging",
+            ),
+            Skill(
+                name="write-tests",
+                description="Write unit tests",
+                instructions="Use pytest framework",
+                source=SkillSource.COMMUNITY,
+                category="testing",
+            ),
         ]
         store.add_skills(skills)
         emb = EmbeddingModel(backend="mock")
@@ -790,12 +962,14 @@ class TestPull:
         # Init and add a custom skill
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         store = SkillStore(data_dir / "skills.db")
-        store.add_skill(Skill(
-            name="my-custom",
-            description="My skill",
-            instructions="Custom instructions unique content",
-            source=SkillSource.COMMUNITY,
-        ))
+        store.add_skill(
+            Skill(
+                name="my-custom",
+                description="My skill",
+                instructions="Custom instructions unique content",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         store.close()
 
         result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
@@ -814,12 +988,14 @@ class TestPull:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         # Add a custom skill
         store = SkillStore(data_dir / "skills.db")
-        store.add_skill(Skill(
-            name="my-custom",
-            description="My skill",
-            instructions="Custom instructions unique",
-            source=SkillSource.COMMUNITY,
-        ))
+        store.add_skill(
+            Skill(
+                name="my-custom",
+                description="My skill",
+                instructions="Custom instructions unique",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         store.close()
 
         result = runner.invoke(main, ["--data-dir", str(data_dir), "pull", "--replace"])
@@ -869,7 +1045,9 @@ class TestPull:
         assert result.exit_code == 0
         assert "build-index" in result.output
 
-    def test_pull_replace_clears_stale_index(self, runner, populated_data_dir, tmp_path, monkeypatch):
+    def test_pull_replace_clears_stale_index(
+        self, runner, populated_data_dir, tmp_path, monkeypatch
+    ):
         """Pull --replace should remove the old index."""
         fake_db = _create_fake_hf_db(tmp_path)
         self._mock_download(fake_db, monkeypatch)
@@ -900,8 +1078,15 @@ class TestSkillSourceCompat:
         from skill_mcp.dedup import deduplicate_skills
 
         skills = [
-            Skill(name="s1", description="d", instructions="same content", source=SkillSource.SKILLNET),
-            Skill(name="s2", description="d", instructions="same content", source=SkillSource.LANGSKILLS),
+            Skill(
+                name="s1", description="d", instructions="same content", source=SkillSource.SKILLNET
+            ),
+            Skill(
+                name="s2",
+                description="d",
+                instructions="same content",
+                source=SkillSource.LANGSKILLS,
+            ),
         ]
         result = deduplicate_skills(skills)
         assert len(result) == 1
@@ -935,7 +1120,15 @@ class TestCrossFeatureLifecycle:
         )
         result = runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(custom_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(custom_dir),
+            ],
         )
         assert result.exit_code == 0
         assert "1 added" in result.output
@@ -980,7 +1173,15 @@ class TestCrossFeatureLifecycle:
         )
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(custom_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(custom_dir),
+            ],
         )
 
         # Incremental build should add only 1
@@ -998,12 +1199,15 @@ class TestCrossFeatureLifecycle:
 
         # Add 3 distinct skills
         store = SkillStore(data_dir / "skills.db")
-        s1 = Skill(name="s1", description="d", instructions="content alpha",
-                    source=SkillSource.COMMUNITY)
-        s2 = Skill(name="s2", description="d", instructions="content beta",
-                    source=SkillSource.COMMUNITY)
-        s3 = Skill(name="s3", description="d", instructions="content gamma",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="s1", description="d", instructions="content alpha", source=SkillSource.COMMUNITY
+        )
+        s2 = Skill(
+            name="s2", description="d", instructions="content beta", source=SkillSource.COMMUNITY
+        )
+        s3 = Skill(
+            name="s3", description="d", instructions="content gamma", source=SkillSource.COMMUNITY
+        )
         store.add_skill(s1)
         store.add_skill(s2)
         store.add_skill(s3)
@@ -1059,7 +1263,15 @@ class TestCrossFeatureLifecycle:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
 
         # Build with model A
@@ -1071,7 +1283,16 @@ class TestCrossFeatureLifecycle:
         # Force rebuild with model B
         result = runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "build-index", "--backend", "mock", "--model", "model-b", "--force"],
+            [
+                "--data-dir",
+                str(data_dir),
+                "build-index",
+                "--backend",
+                "mock",
+                "--model",
+                "model-b",
+                "--force",
+            ],
         )
         assert result.exit_code == 0
         assert "Index built" in result.output
@@ -1103,7 +1324,15 @@ class TestCrossFeatureLifecycle:
         runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         runner.invoke(
             main,
@@ -1120,11 +1349,27 @@ class TestCrossFeatureLifecycle:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         result = runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         assert result.exit_code == 0
         assert "3 duplicates" in result.output
@@ -1159,6 +1404,7 @@ class TestServerHandlerEdgeCases:
     def test_get_skill_nonexistent_id(self):
         """get_skill with invalid ID should return error, not crash."""
         import skill_mcp.server as srv
+
         store = SkillStore()
         srv._store = store
         result = srv._handle_get_skill({"skill_id": "nonexistent-id"})
@@ -1169,6 +1415,7 @@ class TestServerHandlerEdgeCases:
     def test_get_skill_store_is_none(self):
         """get_skill when store is None should not crash."""
         import skill_mcp.server as srv
+
         srv._store = None
         srv._index = None
         srv._embedding = None
@@ -1183,6 +1430,7 @@ class TestServerHandlerEdgeCases:
     def test_keyword_search_store_is_none(self):
         """keyword_search when store is None should not crash."""
         import skill_mcp.server as srv
+
         srv._store = None
         try:
             result = srv._handle_keyword_search({"query": "test"})
@@ -1194,17 +1442,18 @@ class TestServerHandlerEdgeCases:
     def test_list_categories_store_is_none(self):
         """list_categories when store is None should not crash."""
         import skill_mcp.server as srv
+
         srv._store = None
         try:
             result = srv._handle_list_categories()
-            data = json.loads(result[0].text)
-            # Either returns error or empty list
+            json.loads(result[0].text)  # should not crash
         except AttributeError:
             pytest.fail("_handle_list_categories crashes when _store is None — needs null check")
 
     def test_list_categories_empty_store(self):
         """list_categories with empty store should return empty list."""
         import skill_mcp.server as srv
+
         store = SkillStore()
         srv._store = store
         result = srv._handle_list_categories()
@@ -1215,11 +1464,16 @@ class TestServerHandlerEdgeCases:
     def test_search_k_zero(self):
         """search_skills with k=0 should return empty results."""
         import skill_mcp.server as srv
+
         store = SkillStore()
-        store.add_skill(Skill(
-            name="test", description="test", instructions="test content",
-            source=SkillSource.COMMUNITY,
-        ))
+        store.add_skill(
+            Skill(
+                name="test",
+                description="test",
+                instructions="test content",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
         index.build(store, emb)
@@ -1235,11 +1489,16 @@ class TestServerHandlerEdgeCases:
     def test_keyword_search_special_characters(self):
         """keyword_search with FTS5 special chars should not crash."""
         import skill_mcp.server as srv
+
         store = SkillStore()
-        store.add_skill(Skill(
-            name="c++ debugging", description="Debug C++ apps",
-            instructions="Use gdb for debugging", source=SkillSource.COMMUNITY,
-        ))
+        store.add_skill(
+            Skill(
+                name="c++ debugging",
+                description="Debug C++ apps",
+                instructions="Use gdb for debugging",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         srv._store = store
         # These contain FTS5 operators that could cause syntax errors
         for query in ["c++", "NOT AND OR", '"unclosed quote', "test*", "()"]:
@@ -1261,10 +1520,14 @@ class TestStoreAdditionalEdgeCases:
         SkillStore(empty_path).close()
 
         target = SkillStore(tmp_path / "target.db")
-        target.add_skill(Skill(
-            name="existing", description="d", instructions="c",
-            source=SkillSource.COMMUNITY,
-        ))
+        target.add_skill(
+            Skill(
+                name="existing",
+                description="d",
+                instructions="c",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         stats = target.merge_from(empty_path)
         assert stats.total == 0
         assert stats.added == 0
@@ -1276,19 +1539,27 @@ class TestStoreAdditionalEdgeCases:
         # Source has ANTHROPIC (priority 4)
         source_path = tmp_path / "source.db"
         source = SkillStore(source_path)
-        source.add_skill(Skill(
-            name="upgraded", description="d", instructions="same content for both",
-            source=SkillSource.ANTHROPIC,
-        ))
+        source.add_skill(
+            Skill(
+                name="upgraded",
+                description="d",
+                instructions="same content for both",
+                source=SkillSource.ANTHROPIC,
+            )
+        )
         source.close()
 
         # Target has LANGSKILLS (priority 2)
         target_path = tmp_path / "target.db"
         target = SkillStore(target_path)
-        target.add_skill(Skill(
-            name="original", description="d", instructions="same content for both",
-            source=SkillSource.LANGSKILLS,
-        ))
+        target.add_skill(
+            Skill(
+                name="original",
+                description="d",
+                instructions="same content for both",
+                source=SkillSource.LANGSKILLS,
+            )
+        )
         stats = target.merge_from(source_path)
         assert stats.replaced == 1
         assert target.count() == 1  # replaced, not added
@@ -1307,8 +1578,9 @@ class TestStoreAdditionalEdgeCases:
     def test_add_skill_same_id_ignored(self):
         """Adding skill with same ID (INSERT OR IGNORE) should not duplicate."""
         store = SkillStore()
-        s1 = Skill(name="test", description="d", instructions="content",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="test", description="d", instructions="content", source=SkillSource.COMMUNITY
+        )
         store.add_skill(s1)
         # Same skill again should be ignored
         result = store.add_skill(s1)
@@ -1326,8 +1598,7 @@ class TestStoreAdditionalEdgeCases:
     def test_skill_with_empty_instructions(self):
         """Skill with empty instructions should still work."""
         store = SkillStore()
-        s = Skill(name="empty", description="d", instructions="",
-                  source=SkillSource.COMMUNITY)
+        s = Skill(name="empty", description="d", instructions="", source=SkillSource.COMMUNITY)
         store.add_skill(s)
         retrieved = store.get_skill(s.id)
         assert retrieved is not None
@@ -1352,8 +1623,9 @@ class TestIndexEdgeCases:
     def test_search_k_larger_than_ntotal(self):
         """Search with k > ntotal should return all available results."""
         store = SkillStore()
-        store.add_skill(Skill(name="s1", description="d", instructions="c1",
-                              source=SkillSource.COMMUNITY))
+        store.add_skill(
+            Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY)
+        )
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
         index.build(store, emb)
@@ -1376,10 +1648,8 @@ class TestIndexEdgeCases:
     def test_save_load_roundtrip(self, tmp_path):
         """Save → load should preserve all state."""
         store = SkillStore()
-        s1 = Skill(name="s1", description="d1", instructions="c1",
-                    source=SkillSource.COMMUNITY)
-        s2 = Skill(name="s2", description="d2", instructions="c2",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(name="s1", description="d1", instructions="c1", source=SkillSource.COMMUNITY)
+        s2 = Skill(name="s2", description="d2", instructions="c2", source=SkillSource.COMMUNITY)
         store.add_skill(s1)
         store.add_skill(s2)
         emb = EmbeddingModel(backend="mock")
@@ -1405,17 +1675,23 @@ class TestIndexEdgeCases:
     def test_update_then_search_finds_new_skill(self):
         """After incremental update, search should find the new skill."""
         store = SkillStore()
-        s1 = Skill(name="python-debug", description="Debug Python apps",
-                    instructions="Use pdb for Python debugging",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="python-debug",
+            description="Debug Python apps",
+            instructions="Use pdb for Python debugging",
+            source=SkillSource.COMMUNITY,
+        )
         store.add_skill(s1)
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
         index.build(store, emb)
 
-        s2 = Skill(name="rust-debug", description="Debug Rust apps",
-                    instructions="Use rust-gdb for Rust debugging",
-                    source=SkillSource.COMMUNITY)
+        s2 = Skill(
+            name="rust-debug",
+            description="Debug Rust apps",
+            instructions="Use rust-gdb for Rust debugging",
+            source=SkillSource.COMMUNITY,
+        )
         store.add_skill(s2)
         index.update(store, emb)
 
@@ -1438,10 +1714,8 @@ class TestRetriever:
         from skill_mcp.retriever import retrieve
 
         store = SkillStore()
-        s1 = Skill(name="s1", description="d", instructions="c1",
-                    source=SkillSource.COMMUNITY)
-        s2 = Skill(name="s2", description="d", instructions="c2",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY)
+        s2 = Skill(name="s2", description="d", instructions="c2", source=SkillSource.COMMUNITY)
         store.add_skill(s1)
         store.add_skill(s2)
 
@@ -1464,8 +1738,9 @@ class TestRetriever:
         from skill_mcp.retriever import retrieve
 
         store = SkillStore()
-        store.add_skill(Skill(name="s1", description="d", instructions="c1",
-                              source=SkillSource.COMMUNITY))
+        store.add_skill(
+            Skill(name="s1", description="d", instructions="c1", source=SkillSource.COMMUNITY)
+        )
         emb = EmbeddingModel(backend="mock")
         index = SkillIndex(emb.dimension)
         index.build(store, emb)
@@ -1487,8 +1762,15 @@ class TestCLIEdgeCases:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         result = runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory",
-             "--path", "/nonexistent/path"],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                "/nonexistent/path",
+            ],
         )
         assert result.exit_code != 0
 
@@ -1505,16 +1787,20 @@ class TestCLIEdgeCases:
     def test_dedup_removes_via_cli(self, runner, data_dir):
         """dedup command removes duplicates inserted via raw SQL (bypassing store dedup)."""
         import sqlite3
+
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
 
         # Insert duplicates via raw SQL to bypass _add_skill_detail dedup
         store = SkillStore(data_dir / "skills.db")
-        s1 = Skill(name="s1", description="d", instructions="shared content",
-                    source=SkillSource.LANGSKILLS)
-        s2 = Skill(name="s2", description="d", instructions="shared content",
-                    source=SkillSource.ANTHROPIC)
-        s3 = Skill(name="s3", description="d", instructions="unique content",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="s1", description="d", instructions="shared content", source=SkillSource.LANGSKILLS
+        )
+        s2 = Skill(
+            name="s2", description="d", instructions="shared content", source=SkillSource.ANTHROPIC
+        )
+        s3 = Skill(
+            name="s3", description="d", instructions="unique content", source=SkillSource.COMMUNITY
+        )
         # Add s2 first (higher priority), then force s1 in via raw SQL
         store.add_skill(s2)
         store.add_skill(s3)
@@ -1522,8 +1808,19 @@ class TestCLIEdgeCases:
         conn.execute(
             "INSERT INTO skills (id, name, description, instructions, source, source_id, category, tags, metadata, content_hash, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (s1.id, s1.name, s1.description, s1.instructions, s1.source.value,
-             s1.source_id, s1.category, "[]", "{}", s1.content_hash, s1.created_at.isoformat()),
+            (
+                s1.id,
+                s1.name,
+                s1.description,
+                s1.instructions,
+                s1.source.value,
+                s1.source_id,
+                s1.category,
+                "[]",
+                "{}",
+                s1.content_hash,
+                s1.created_at.isoformat(),
+            ),
         )
         conn.commit()
         conn.close()
@@ -1553,7 +1850,15 @@ class TestCLIEdgeCases:
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
         )
         runner.invoke(
             main,
@@ -1569,7 +1874,15 @@ class TestCLIEdgeCases:
         )
         runner.invoke(
             main,
-            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(extra_dir)],
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(extra_dir),
+            ],
         )
 
         result = runner.invoke(main, ["--data-dir", str(data_dir), "status"])
@@ -1601,18 +1914,19 @@ class TestSchemaEdgeCases:
 
     def test_same_content_different_source_same_hash(self):
         """Same instructions from different sources should have same content_hash."""
-        s1 = Skill(name="a", description="d", instructions="identical",
-                    source=SkillSource.LANGSKILLS)
-        s2 = Skill(name="b", description="d", instructions="identical",
-                    source=SkillSource.ANTHROPIC)
+        s1 = Skill(
+            name="a", description="d", instructions="identical", source=SkillSource.LANGSKILLS
+        )
+        s2 = Skill(
+            name="b", description="d", instructions="identical", source=SkillSource.ANTHROPIC
+        )
         assert s1.content_hash == s2.content_hash
         # But different IDs since source differs
         assert s1.id != s2.id
 
     def test_embedding_text_with_empty_instructions(self):
         """to_embedding_text should work with empty instructions."""
-        s = Skill(name="test", description="desc", instructions="",
-                  source=SkillSource.COMMUNITY)
+        s = Skill(name="test", description="desc", instructions="", source=SkillSource.COMMUNITY)
         text = s.to_embedding_text()
         assert "test" in text
         assert "desc" in text
@@ -1643,6 +1957,7 @@ class TestConfigEdgeCases:
     def test_config_preserves_custom_embedding(self, tmp_path):
         """Config round-trip should preserve custom embedding settings."""
         from skill_mcp.config import save_config
+
         config = Config(data_dir=str(tmp_path))
         config.embedding.backend = "openai"
         config.embedding.model = "text-embedding-3-large"
@@ -1674,9 +1989,12 @@ class TestFTSEdgeCases:
     def test_fts_search_after_delete(self):
         """FTS should stay in sync after deleting a skill."""
         store = SkillStore()
-        s1 = Skill(name="unique-findable", description="d",
-                    instructions="special searchable content xyz123",
-                    source=SkillSource.COMMUNITY)
+        s1 = Skill(
+            name="unique-findable",
+            description="d",
+            instructions="special searchable content xyz123",
+            source=SkillSource.COMMUNITY,
+        )
         store.add_skill(s1)
 
         results = store.search_keyword("xyz123")
@@ -1690,11 +2008,14 @@ class TestFTSEdgeCases:
     def test_fts_with_special_characters(self):
         """FTS should handle special characters in queries."""
         store = SkillStore()
-        store.add_skill(Skill(
-            name="c-sharp-testing", description="Test C# apps",
-            instructions="Use NUnit for C# testing",
-            source=SkillSource.COMMUNITY,
-        ))
+        store.add_skill(
+            Skill(
+                name="c-sharp-testing",
+                description="Test C# apps",
+                instructions="Use NUnit for C# testing",
+                source=SkillSource.COMMUNITY,
+            )
+        )
         # These should not crash
         for q in ["C#", "c++", "node.js", "test*", "(debug)"]:
             results = store.search_keyword(q)

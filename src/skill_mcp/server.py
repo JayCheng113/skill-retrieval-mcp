@@ -116,12 +116,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 def _handle_search_skills(arguments: dict) -> list[TextContent]:
     if _store is None or _index is None or _embedding is None:
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "error": "Vector index not available. Run `skill-mcp build-index` first.",
-            }),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "error": "Vector index not available. Run `skill-mcp build-index` first.",
+                    }
+                ),
+            )
+        ]
 
     query = arguments["query"]
     k = arguments.get("k", 5)
@@ -144,18 +148,24 @@ def _handle_search_skills(arguments: dict) -> list[TextContent]:
 
 def _handle_get_skill(arguments: dict) -> list[TextContent]:
     if _store is None:
-        return [TextContent(
-            type="text",
-            text=json.dumps({"error": "Skill store not available. Run `skill-mcp init` first."}),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"error": "Skill store not available. Run `skill-mcp init` first."}
+                ),
+            )
+        ]
     skill_id = arguments["skill_id"]
     skill = _store.get_skill(skill_id)
     if skill is None:
         logger.warning("get_skill: not found id=%s", skill_id)
-        return [TextContent(
-            type="text",
-            text=json.dumps({"error": "Skill not found", "skill_id": skill_id}),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps({"error": "Skill not found", "skill_id": skill_id}),
+            )
+        ]
 
     output = {
         "id": skill.id,
@@ -171,10 +181,14 @@ def _handle_get_skill(arguments: dict) -> list[TextContent]:
 
 def _handle_keyword_search(arguments: dict) -> list[TextContent]:
     if _store is None:
-        return [TextContent(
-            type="text",
-            text=json.dumps({"error": "Skill store not available. Run `skill-mcp init` first."}),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"error": "Skill store not available. Run `skill-mcp init` first."}
+                ),
+            )
+        ]
     query = arguments["query"]
     limit = arguments.get("limit", 10)
 
@@ -195,10 +209,14 @@ def _handle_keyword_search(arguments: dict) -> list[TextContent]:
 
 def _handle_list_categories() -> list[TextContent]:
     if _store is None:
-        return [TextContent(
-            type="text",
-            text=json.dumps({"error": "Skill store not available. Run `skill-mcp init` first."}),
-        )]
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"error": "Skill store not available. Run `skill-mcp init` first."}
+                ),
+            )
+        ]
     counts = _store.category_counts()
     return [TextContent(type="text", text=json.dumps(counts, ensure_ascii=False))]
 
@@ -228,7 +246,9 @@ async def run_server(config_path: Path | None = None, transport: str = "stdio") 
         _embedding = EmbeddingModel(model_name=model, backend=backend)
         logger.info(
             "index: loaded %d vectors (%s/%s)",
-            len(_index.skill_ids), backend, model,
+            len(_index.skill_ids),
+            backend,
+            model,
         )
     else:
         logger.warning("index: not found at %s, semantic search disabled", index_dir)
@@ -253,10 +273,12 @@ async def run_server(config_path: Path | None = None, transport: str = "stdio") 
             async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
                 await server.run(streams[0], streams[1], server.create_initialization_options())
 
-        app = Starlette(routes=[
-            Route("/sse", endpoint=handle_sse),
-            Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
-        ])
+        app = Starlette(
+            routes=[
+                Route("/sse", endpoint=handle_sse),
+                Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
+            ]
+        )
         uvicorn.run(app, host="127.0.0.1", port=8000)
     else:
         async with stdio_server() as (read_stream, write_stream):

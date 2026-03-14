@@ -71,9 +71,11 @@ class Skill:
             data["created_at"] = datetime.fromisoformat(data["created_at"])
         if isinstance(data.get("tags"), str):
             import json
+
             data["tags"] = json.loads(data["tags"])
         if isinstance(data.get("metadata"), str):
             import json
+
             data["metadata"] = json.loads(data["metadata"])
         return cls(**data)
 

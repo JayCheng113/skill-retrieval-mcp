@@ -9,9 +9,24 @@ from skill_mcp.store import SkillStore
 
 def _populate_store(store: SkillStore) -> list[Skill]:
     skills = [
-        Skill(name="debug-memory", description="Debug memory leaks", instructions="Use profiler", source=SkillSource.COMMUNITY),
-        Skill(name="write-tests", description="Write unit tests", instructions="Use pytest", source=SkillSource.COMMUNITY),
-        Skill(name="deploy-docker", description="Deploy with Docker", instructions="Use Dockerfile", source=SkillSource.COMMUNITY),
+        Skill(
+            name="debug-memory",
+            description="Debug memory leaks",
+            instructions="Use profiler",
+            source=SkillSource.COMMUNITY,
+        ),
+        Skill(
+            name="write-tests",
+            description="Write unit tests",
+            instructions="Use pytest",
+            source=SkillSource.COMMUNITY,
+        ),
+        Skill(
+            name="deploy-docker",
+            description="Deploy with Docker",
+            instructions="Use Dockerfile",
+            source=SkillSource.COMMUNITY,
+        ),
     ]
     store.add_skills(skills)
     return skills
@@ -19,7 +34,7 @@ def _populate_store(store: SkillStore) -> list[Skill]:
 
 def test_retrieve_returns_results():
     store = SkillStore()
-    skills = _populate_store(store)
+    _populate_store(store)
 
     emb = EmbeddingModel(backend="mock")
     index = SkillIndex(emb.dimension)

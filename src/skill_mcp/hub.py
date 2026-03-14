@@ -24,11 +24,13 @@ def _hf_download(filename: str) -> Path:
             "HuggingFace Hub is required for pull. Install with:\n"
             "  pip install skill-retrieval-mcp[hf]"
         )
-    return Path(hf_hub_download(
-        repo_id=HF_REPO,
-        filename=filename,
-        repo_type="dataset",
-    ))
+    return Path(
+        hf_hub_download(
+            repo_id=HF_REPO,
+            filename=filename,
+            repo_type="dataset",
+        )
+    )
 
 
 def download_skills_db() -> Path:
