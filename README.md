@@ -97,17 +97,29 @@ Your custom skills live alongside the pre-built ones. Deduplication is automatic
 
 The default setup uses `sentence-transformers/all-MiniLM-L6-v2` — a local model (384-dim, free, no API key). This is what the pre-built index from `pull --include-index` uses, and what encodes your search queries at runtime.
 
-You can switch to a different backend:
+You can switch to a different backend. We provide pre-built indexes for 89K skills on HuggingFace, so you don't have to re-embed them yourself:
 
-| Backend | Install | Pre-built index on HF | Requires |
-|---------|---------|----------------------|----------|
-| `sentence-transformers` (default) | `pip install skill-retrieval-mcp[local]` | 137MB | Nothing |
-| `openai` | `pip install skill-retrieval-mcp[openai]` | 1.1GB | `OPENAI_API_KEY` |
-| `ollama` | `pip install skill-retrieval-mcp[ollama]` | — (build locally) | Ollama running |
+| Backend | Install | Pre-built index for 89K skills | Requires |
+|---------|---------|-------------------------------|----------|
+| `sentence-transformers` (default) | `pip install skill-retrieval-mcp[local]` | available (137MB) | Nothing |
+| `openai` | `pip install skill-retrieval-mcp[openai]` | available (1.1GB) | `OPENAI_API_KEY` |
+| `ollama` | `pip install skill-retrieval-mcp[ollama]` | not available — build locally | Ollama running |
+
+`pull --include-index` automatically downloads the pre-built index matching your configured backend. To use OpenAI embeddings with the pre-built index:
 
 ```bash
-# Rebuild all vectors with a different model
-skill-mcp build-index --backend openai --model text-embedding-3-large --force
+# 1. Edit ~/.skill-mcp/config.yaml:
+#    embedding:
+#      backend: openai
+#      model: text-embedding-3-large
+# 2. Download the matching pre-built index:
+skill-mcp pull --include-index
+```
+
+To rebuild all vectors locally (required for ollama, or if you added custom skills):
+
+```bash
+skill-mcp build-index --backend ollama --model nomic-embed-text --force
 ```
 
 One index = one embedding model. All vectors must come from the same model. `build-index` detects mismatches and requires `--force` to rebuild.
