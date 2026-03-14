@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from pathlib import Path
 
 from mcp.server import Server
@@ -14,6 +16,8 @@ from skill_mcp.embeddings import EmbeddingModel
 from skill_mcp.index import SkillIndex
 from skill_mcp.retriever import retrieve
 from skill_mcp.store import SkillStore
+
+logger = logging.getLogger("skill_mcp")
 
 server = Server("skill-retrieval")
 
@@ -91,16 +95,23 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    logger.debug("tool_call: %s args=%s", name, arguments)
+    t0 = time.perf_counter()
+
     if name == "search_skills":
-        return _handle_search_skills(arguments)
+        result = _handle_search_skills(arguments)
     elif name == "get_skill":
-        return _handle_get_skill(arguments)
+        result = _handle_get_skill(arguments)
     elif name == "keyword_search":
-        return _handle_keyword_search(arguments)
+        result = _handle_keyword_search(arguments)
     elif name == "list_categories":
-        return _handle_list_categories()
+        result = _handle_list_categories()
     else:
-        return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
+        result = [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
+
+    elapsed = (time.perf_counter() - t0) * 1000
+    logger.info("tool_call: %s %.1fms", name, elapsed)
+    return result
 
 
 def _handle_search_skills(arguments: dict) -> list[TextContent]:
@@ -116,6 +127,7 @@ def _handle_search_skills(arguments: dict) -> list[TextContent]:
     k = arguments.get("k", 5)
 
     results = retrieve(query, _store, _index, _embedding, k=k)
+    logger.debug("search: query=%r k=%d results=%d", query, k, len(results))
     output = [
         {
             "id": r.skill.id,
@@ -139,6 +151,7 @@ def _handle_get_skill(arguments: dict) -> list[TextContent]:
     skill_id = arguments["skill_id"]
     skill = _store.get_skill(skill_id)
     if skill is None:
+        logger.warning("get_skill: not found id=%s", skill_id)
         return [TextContent(
             type="text",
             text=json.dumps({"error": "Skill not found", "skill_id": skill_id}),
@@ -166,6 +179,7 @@ def _handle_keyword_search(arguments: dict) -> list[TextContent]:
     limit = arguments.get("limit", 10)
 
     results = _store.search_keyword(query, limit=limit)
+    logger.debug("keyword_search: query=%r limit=%d results=%d", query, limit, len(results))
     output = [
         {
             "id": s.id,
@@ -199,18 +213,27 @@ async def run_server(config_path: Path | None = None, transport: str = "stdio") 
     db_path = config.db_path
     if db_path.exists():
         _store = SkillStore(db_path, readonly=True)
+        logger.info("store: loaded %d skills from %s", _store.count(), db_path)
     else:
         _store = SkillStore()  # in-memory fallback
+        logger.warning("store: database not found at %s, using in-memory fallback", db_path)
 
     # Load index if available
     index_dir = config.index_dir
     if (index_dir / "index.faiss").exists():
         _index = SkillIndex.load(index_dir)
-        # Use the embedding backend/model that was used to build the index
         emb_info = _index.embedding_info
         backend = emb_info.get("backend", config.embedding.backend)
         model = emb_info.get("model", config.embedding.model)
         _embedding = EmbeddingModel(model_name=model, backend=backend)
+        logger.info(
+            "index: loaded %d vectors (%s/%s)",
+            len(_index.skill_ids), backend, model,
+        )
+    else:
+        logger.warning("index: not found at %s, semantic search disabled", index_dir)
+
+    logger.info("server: starting transport=%s", transport)
 
     if transport == "sse":
         try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import click
@@ -11,11 +12,21 @@ import click
 @click.group()
 @click.option("--data-dir", "global_data_dir", default=None, envvar="SKILL_MCP_DATA_DIR",
               help="Override data directory (default: ~/.skill-mcp, env: SKILL_MCP_DATA_DIR)")
+@click.option("--log-level", default=None, envvar="SKILL_MCP_LOG_LEVEL",
+              type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
+              help="Log level (default: WARNING, env: SKILL_MCP_LOG_LEVEL)")
 @click.pass_context
-def main(ctx, global_data_dir: str | None):
+def main(ctx, global_data_dir: str | None, log_level: str | None):
     """skill-retrieval-mcp: RAG-based skill retrieval for AI agents."""
     ctx.ensure_object(dict)
     ctx.obj["data_dir"] = global_data_dir
+
+    if log_level:
+        logging.basicConfig(
+            level=getattr(logging, log_level.upper()),
+            format="%(asctime)s %(name)s %(levelname)s %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
 
 def _load_config_from_ctx(ctx) -> "Config":
@@ -370,6 +381,14 @@ def serve(ctx, transport: str):
     """Start the MCP server."""
     import asyncio
     from skill_mcp.server import run_server
+
+    # Default to INFO for serve if no explicit --log-level
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(name)s %(levelname)s %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
     config = _load_config_from_ctx(ctx)
     asyncio.run(run_server(config_path=config.config_path, transport=transport))

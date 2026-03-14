@@ -9,6 +9,19 @@ description = "Lightweight MCP Server for RAG-based skill retrieval"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
+authors = [
+    {name = "Zhan Cheng", email = "zcheng256@gmail.com"},
+]
+keywords = ["mcp", "skill-retrieval", "rag", "ai-agents", "faiss"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "mcp>=1.0",
     "faiss-cpu>=1.8",
@@ -17,6 +30,11 @@ dependencies = [
     "pyyaml>=6.0",
     "tqdm>=4.66",
 ]
+
+[project.urls]
+Homepage = "https://github.com/JayCheng113/skill-retrieval-mcp"
+Repository = "https://github.com/JayCheng113/skill-retrieval-mcp"
+Issues = "https://github.com/JayCheng113/skill-retrieval-mcp/issues"
 
 [project.optional-dependencies]
 openai = ["openai>=1.50", "tiktoken>=0.7"]
