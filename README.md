@@ -23,19 +23,25 @@ Modern skill libraries contain **100K+ skills** (LangSkills, Anthropic official,
 ## Quick Start
 
 ```bash
-# Install
-pip install skill-retrieval-mcp
+# Install (with local embeddings)
+pip install "skill-retrieval-mcp[local,hf]"
 
-# Initialize (creates ~/.skill-mcp/, optional agent registration)
+# Initialize
 skill-mcp init
 
-# Import skills from a directory of SKILL.md files
-skill-mcp import --source directory --path ~/my-skills/
+# Pull pre-built dataset (~89K skills, deduplicated, ready to use)
+skill-mcp pull
 
 # Build the vector index
 skill-mcp build-index --backend sentence-transformers
 
 # Done — your agent can now use search_skills, get_skill, etc.
+```
+
+`skill-mcp pull` downloads a curated, pre-deduplicated skill database from [HuggingFace](https://huggingface.co/datasets/zcheng256/skillretrieval-data) so you can skip manual import entirely. Alternatively, import your own skills:
+
+```bash
+skill-mcp import --source directory --path ~/my-skills/
 ```
 
 ## How It Works
@@ -118,7 +124,19 @@ With `all-MiniLM-L6-v2` (384-dim, local, free):
 
 ## Skill Sources
 
-Import skills from multiple sources at scale:
+### Pre-built dataset (recommended)
+
+```bash
+# Download 89K skills from HuggingFace — one command, no manual work
+skill-mcp pull
+
+# Overwrite an existing database
+skill-mcp pull --force
+```
+
+The pre-built dataset includes skills from LangSkills, SkillNet, Anthropic official, and community sources — already deduplicated and ready to index. Requires `pip install skill-retrieval-mcp[hf]`.
+
+### Import your own skills
 
 ```bash
 # Local SKILL.md directory (→ SkillSource.COMMUNITY)
@@ -131,7 +149,7 @@ skill-mcp import --source anthropic --path ~/anthropic-skills/
 skill-mcp import --source langskills --path langskills.db
 ```
 
-Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS.
+Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.
 
 ### SKILL.md Format
 
@@ -172,6 +190,7 @@ skill-mcp build-index --backend ollama --model nomic-embed-text --force
 
 ```
 skill-mcp init [--data-dir DIR] [--no-register]   Initialize data directory and config
+skill-mcp pull [--force]                           Download pre-built dataset from HuggingFace
 skill-mcp import --source SOURCE --path PATH       Import skills into the store
 skill-mcp build-index [--backend B] [--model M]    Build FAISS vector index
 skill-mcp serve [--transport stdio|sse]            Start MCP server
@@ -179,6 +198,8 @@ skill-mcp search QUERY [--k N]                     Local search (for testing)
 skill-mcp status                                   Show store/index/config status
 skill-mcp dedup                                    Run cross-source deduplication
 ```
+
+All commands respect `--data-dir` (or env `SKILL_MCP_DATA_DIR`) for custom data locations.
 
 ## Configuration
 
@@ -242,7 +263,8 @@ The server uses stdio transport by default. Point your agent's MCP config to `sk
 ```
 src/skill_mcp/
 ├── server.py          # MCP Server — 4 tool handlers
-├── cli.py             # Click CLI — init/import/build-index/serve/status/search
+├── cli.py             # Click CLI — init/pull/import/build-index/serve/status/search
+├── hub.py             # HuggingFace Hub dataset download
 ├── config.py          # YAML config loading with defaults
 ├── store.py           # SQLite + FTS5 skill storage
 ├── schema.py          # Skill/RetrievedSkill data models
@@ -253,7 +275,7 @@ src/skill_mcp/
 └── importers/         # Pluggable importers (directory/langskills/anthropic)
 ```
 
-~15 source files total. No agent framework, no evaluation infrastructure, no experiment runners — just skill storage, indexing, and serving.
+~16 source files total. No agent framework, no evaluation infrastructure, no experiment runners — just skill storage, indexing, and serving.
 
 ## Scalability
 
@@ -270,7 +292,7 @@ src/skill_mcp/
 **Core (6 packages)**:
 `mcp`, `faiss-cpu`, `numpy`, `click`, `pyyaml`, `tqdm`
 
-**Optional**: `sentence-transformers`, `openai`, `httpx` (for Ollama)
+**Optional**: `sentence-transformers`, `openai`, `httpx` (Ollama), `huggingface-hub` (pull), `starlette`+`uvicorn` (SSE)
 
 ## Development
 
