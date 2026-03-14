@@ -141,8 +141,10 @@ All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR` for custom loc
 git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
-pytest tests/ -v                  # 83 tests
+pytest tests/ -v                  # 110 tests
 ```
+
+Architecture, data model, and extension guide: [`dev.md`](dev.md)
 
 ## License
 
