@@ -227,23 +227,37 @@ This is set via `Server(name, instructions=...)` in `server.py`. The instruction
 
 ## MCP Tool Interface
 
+### Two-step retrieval: search → filter → fetch
+
+The core design is a **summary-first pipeline** that saves context tokens:
+
+1. **Search** (`search_skills` or `keyword_search`) returns summaries — name, description, score, tags — but **no instructions**
+2. **Agent reads summaries** and decides which skills are relevant based on descriptions and scores
+3. **Fetch** (`get_skill`) retrieves full instructions only for the skills the agent actually needs
+
+This means: 5 results searched, 1–2 skills fetched → 60–80% token savings compared to loading all results.
+
 ### search_skills
 
 ```json
-{"query": "debug memory leak", "k": 3}
-→ [{"id": "a1b2", "name": "...", "description": "...", "score": 0.81, "category": "...", "tags": [...]}]
+{"query": "debug memory leak", "k": 5}
+→ [
+    {"id": "a1b2", "name": "debug-memory-leak", "description": "Identify and fix...", "score": 0.81, "category": "debugging", "tags": [...]},
+    {"id": "c3d4", "name": "python-profiling", "description": "Profile Python...", "score": 0.72, ...},
+    ...
+  ]
 ```
 
-Semantic search. Returns summaries only (no `instructions`) to save context tokens. Tool description emphasizes domain breadth and low search cost (< 5ms) to encourage agents to search proactively for any task.
+Semantic search via FAISS. Agent reviews the returned descriptions and scores, then calls `get_skill` only for the most relevant results. Tool description emphasizes domain breadth and low search cost (< 5ms) to encourage agents to search proactively for any task.
 
 ### get_skill
 
 ```json
 {"skill_id": "a1b2"}
-→ {"id": "...", "name": "...", "instructions": "full text...", ...}
+→ {"id": "a1b2", "name": "debug-memory-leak", "instructions": "## Step 1: ...(full guide)...", ...}
 ```
 
-Fetch full instructions. Tool description references the search → get_skill workflow.
+Fetch full instructions. This is the only way to get the `instructions` field — search results deliberately omit it. Tool description references the search → get_skill workflow.
 
 ### keyword_search
 
@@ -252,7 +266,7 @@ Fetch full instructions. Tool description references the search → get_skill wo
 → [{"id": "...", "name": "...", "description": "...", ...}]
 ```
 
-FTS5 text search. Works without vector index. Special characters auto-escaped. Tool description steers agents to prefer this over `search_skills` when they have specific tool names, error messages, or CLI commands.
+FTS5 text search. Same summary-only output as `search_skills`. Works without vector index. Special characters auto-escaped. Tool description steers agents to prefer this when they have specific tool names, error messages, or CLI commands.
 
 ### list_categories
 
@@ -261,7 +275,7 @@ FTS5 text search. Works without vector index. Special characters auto-escaped. T
 → [{"category": "debugging", "count": 42}, ...]
 ```
 
-Tool description includes use-case context ("discover what domains are covered").
+Browse available domains. Useful for discovery and scoping searches.
 
 ## Dependencies
 

@@ -2,157 +2,166 @@
 
 > Your agent doesn't need 200K skills in context. It needs the right 5.
 
-An MCP server that gives AI agents on-demand access to 89K+ skills covering virtually every technical domain — programming, DevOps, cloud, ML, databases, security, documentation, API design, testing, project management, and more. Search is < 5ms with zero API calls.
+An MCP server that gives AI agents on-demand access to **89K+ skills** covering virtually every technical domain. The agent searches as it works — the same way you look up docs mid-task.
 
 Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any MCP-compatible agent.
 
-## Why
+## The Problem
 
-Traditional skill systems pre-load skills into context. This doesn't scale — you hit context limits at 10–20 skills, and the agent wastes tokens on irrelevant ones.
+You give your agent a skill — "always use TDD," "follow this API style" — and it works. But skills live in context, and context is finite:
 
-skill-retrieval-mcp flips the approach: **89K+ skills are always one search away**, and searching costs < 5ms with zero API calls. The agent searches as it works, the same way an engineer looks up documentation mid-task — whether the task is writing code, designing an API, setting up CI/CD, writing documentation, or anything else where best practices exist.
+- **Pre-load 10 skills?** The agent knows 10 things. Everything else, it guesses.
+- **Pre-load 100?** You're burning tokens on 95 irrelevant skills per task.
+- **Pre-load 1000?** You can't. Context window says no.
 
-| | Pre-loading all skills | skill-retrieval-mcp |
+## The Fix
+
+Don't load skills. **Search them.**
+
+```
+You: "Help me set up CI/CD for this Python project"
+
+─── Step 1: Agent searches ───────────────────────────────────────────
+
+Agent: search_skills("github actions python CI pipeline")        ← 3ms
+     → 5 results (summaries only, no full instructions):
+       1. "github-actions-python"    (0.91) - CI/CD pipelines for Python with pytest and linting
+       2. "github-actions-docker"    (0.72) - Docker build and push in GitHub Actions
+       3. "gitlab-ci-python"         (0.68) - GitLab CI/CD for Python projects
+       4. "circleci-python"          (0.61) - CircleCI configuration for Python
+       5. "jenkins-pipeline"         (0.45) - Jenkins declarative pipelines
+
+─── Step 2: Agent reads descriptions, picks #1 ──────────────────────
+
+Agent: get_skill("github-actions-python")
+     → gets full guide: step-by-step setup, matrix testing, caching, best practices
+     → writes .github/workflows/ci.yml
+
+─── Step 3: New need emerges mid-task ────────────────────────────────
+
+Agent: # workflow needs PyPI publishing — search again with different query
+       search_skills("pypi publish trusted publisher")           ← 2ms
+     → "pypi-trusted-publishing" (0.87) - OIDC-based PyPI publishing without API keys
+     → reads guide, adds publish step
+```
+
+Key behaviors:
+
+- **Search returns summaries, not full instructions** — the agent reads descriptions and scores to decide which skills are worth fetching. 5 results searched, 1 skill read → 80% token savings.
+- **The agent searches multiple times** as the task evolves. Different phase → different query → different skill.
+- **Queries are shaped by context.** The second search includes "trusted publisher" — a term the agent picked up while working, not something the user said.
+
+89K skills. < 5ms search. Zero LLM calls. Runs locally.
+
+| | Pre-loading skills | skill-retrieval-mcp |
 |---|---|---|
-| **Scale** | 10–20 skills | 89K+ |
-| **Domain coverage** | Hand-picked | Virtually every technical domain |
-| **Selection** | Manual, upfront | Semantic search, on-demand |
-| **Search latency** | — | < 5ms |
-| **Context cost** | Everything loaded | Top-k summaries only |
-| **LLM calls for retrieval** | — | Zero (local FAISS) |
+| **Scale** | 10–20 max | 89K+ |
+| **Selection** | You pick upfront | Agent picks per-task |
+| **Context cost** | All loaded always | Top-k on demand |
+| **Search** | — | < 5ms, local FAISS |
 
-## How It Works
+## Quick Start
 
-```
-User: "Set up a FastAPI project with JWT auth and deploy to k8s"
-
-Agent thinks: I need best practices for several things here.
-
-  ① search_skills("FastAPI project structure best practices")
-    → finds "fastapi-project-setup" (score: 0.89)
-
-  ② get_skill("fastapi-project-setup")
-    → reads full guide, starts implementing...
-
-  ③ While writing auth, searches again:
-    search_skills("JWT authentication FastAPI security")
-    → finds "jwt-auth-fastapi" (score: 0.85)
-
-  ④ While writing k8s manifests:
-    search_skills("kubernetes deployment python application")
-    → finds "k8s-deploy-python" (score: 0.82)
-```
-
-The agent constructs different queries at each step based on what it's currently working on. It doesn't search everything upfront — it searches **when it needs to**, with queries shaped by the task context.
-
-## Get Started
-
-### 1. Install
+Three commands. Takes about 2 minutes (mostly download time).
 
 ```bash
+# 1. Install
 pip install "skill-retrieval-mcp[local,hf]"
-```
 
-`[local]` installs `sentence-transformers` for local query embedding. `[hf]` installs `huggingface-hub` for downloading the skill database.
-
-### 2. Download skills and index
-
-```bash
+# 2. Download 89K skills + pre-built vector index
 skill-mcp pull --include-index
+
+# 3. Register with your agent (auto-detects Claude Code, Cursor, etc.)
+skill-mcp init
 ```
 
-This downloads from [HuggingFace](https://huggingface.co/datasets/zcheng256/skillretrieval-data):
-- **89,267 skills** (960MB SQLite) — sourced from LangSkills, SkillNet, Anthropic official, and community contributions
-- **Pre-built vector index** (137MB) — 384-dim vectors with `all-MiniLM-L6-v2`, ready for search
+Done. Your agent now searches 89K skills on demand.
 
-No local computation needed. To build the index yourself, omit `--include-index` and run `skill-mcp build-index` (~7 min on CPU).
+<details>
+<summary>Manual registration (if <code>init</code> doesn't detect your agent)</summary>
 
-### 3. Register with your agent
-
-```bash
-skill-mcp init    # auto-detects Claude Code and Cursor, prompts to register
-```
-
-Or register manually:
-
-| Agent | Config file | Format |
-|-------|------------|--------|
-| **Claude Code** | `.mcp.json` (project) | `{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}` |
-| **Gemini CLI** | `~/.gemini/settings.json` | same JSON as above |
-| **Cursor** | `.cursor/mcp.json` | same JSON as above |
+| Agent | Config file | Add this |
+|-------|------------|----------|
+| **Claude Code** | `.mcp.json` | `{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}` |
+| **Gemini CLI** | `~/.gemini/settings.json` | same as above |
+| **Cursor** | `.cursor/mcp.json` | same as above |
 | **Codex CLI** | `~/.codex/config.toml` | `[mcp_servers.skill-retrieval]`<br>`command = "skill-mcp"`<br>`args = ["serve"]` |
 
-That's it. Your agent now has access to 89K searchable skills.
+</details>
+
+## What's In the Knowledge Base
+
+89,267 skills across every major technical domain, sourced from [LangSkills](https://github.com/langskills), [SkillNet](https://github.com/SkillNet), Anthropic official, and community contributions.
+
+Each skill is a structured best-practice guide — not a one-liner, but a step-by-step how-to with code examples, common pitfalls, and recommendations.
+
+Run `skill-mcp status` to see what you have locally, or use `list_categories` to browse domains.
 
 ## Tools
 
-| Tool | Purpose | Returns |
-|------|---------|---------|
-| `search_skills` | Semantic search — natural language queries | Top-k summaries with relevance scores |
-| `keyword_search` | Exact term matching — tool names, error messages, CLI commands | Matching summaries via FTS5 |
-| `get_skill` | Fetch full instructions by ID (call after search) | Complete guide with code examples |
-| `list_categories` | Browse available knowledge domains | Category names and counts |
+| Tool | What it does |
+|------|-------------|
+| `search_skills` | Semantic search — describe what you need in natural language |
+| `keyword_search` | Exact match — tool names, error messages, CLI commands |
+| `get_skill` | Fetch full instructions (call after search) |
+| `list_categories` | Browse available domains and counts |
 
-The two-step **search → fetch** design saves context tokens: search results contain summaries only, the agent fetches full instructions only for skills it actually needs.
+Search returns summaries only (saves tokens). The agent calls `get_skill` for the ones it actually needs.
 
 ## Add Your Own Skills
 
-Create `SKILL.md` files:
-
 ```markdown
+<!-- ~/my-skills/deploy-checklist/SKILL.md -->
 ---
-name: "debug-memory-leak"
-description: "Identify and fix memory leaks in long-running applications"
-tags: ["debugging", "memory", "profiling"]
+name: "deploy-checklist"
+description: "Pre-deployment verification checklist for production releases"
+tags: ["deployment", "production", "checklist"]
 ---
 
-Your detailed skill instructions here...
+## Steps
+
+1. Run full test suite...
+2. Check database migrations...
 ```
-
-Import them:
 
 ```bash
 skill-mcp import --source directory --path ~/my-skills/
-skill-mcp build-index    # incremental — only encodes the new skills you just added
+skill-mcp build-index    # incremental — only encodes new skills
 ```
 
-Your custom skills live alongside the pre-built ones. Deduplication is automatic (priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET).
+Custom skills merge with the pre-built ones. Deduplication is automatic.
 
 ## Embedding Backends
 
-The default `sentence-transformers/all-MiniLM-L6-v2` runs locally, requires no API key, and has a pre-built index ready to download.
+Default: `sentence-transformers/all-MiniLM-L6-v2` — local, free, no API key. Pre-built index included.
 
-| Backend | Install | Pre-built index | Requires |
-|---------|---------|-----------------|----------|
-| `sentence-transformers` (default) | `pip install skill-retrieval-mcp[local]` | 137MB | Nothing |
-| `openai` | `pip install skill-retrieval-mcp[openai]` | 1.1GB | `OPENAI_API_KEY` |
-| `ollama` | `pip install skill-retrieval-mcp[ollama]` | build locally | Ollama running |
-
-To switch backend:
+| Backend | Pre-built index | Requires |
+|---------|-----------------|----------|
+| `sentence-transformers` (default) | 137MB | Nothing |
+| `openai` | 1.1GB | `OPENAI_API_KEY` |
+| `ollama` | build locally | Ollama running |
 
 ```bash
-# Edit ~/.skill-mcp/config.yaml, then:
-skill-mcp pull --include-index          # download pre-built index for your backend
-# or
-skill-mcp build-index --backend ollama --model nomic-embed-text --force  # build locally
+# Switch to OpenAI embeddings:
+# 1. Edit ~/.skill-mcp/config.yaml (set backend: openai, model: text-embedding-3-large)
+# 2. Download matching index:
+skill-mcp pull --include-index
 ```
-
-One index = one embedding model. `build-index` detects mismatches and requires `--force` to rebuild.
 
 ## CLI Reference
 
 ```
-skill-mcp init [--no-register]               Create data dir, config, register with agents
-skill-mcp pull [--replace] [--include-index]  Download/merge pre-built dataset from HuggingFace
-skill-mcp import --source SOURCE --path PATH  Import skills from directory/langskills/anthropic
-skill-mcp build-index [--backend B] [--force] Build or incrementally update vector index
+skill-mcp init [--no-register]               Setup + register with agents
+skill-mcp pull [--replace] [--include-index]  Download skills from HuggingFace
+skill-mcp import --source SOURCE --path PATH  Import custom skills
+skill-mcp build-index [--backend B] [--force] Build/update vector index
 skill-mcp serve [--transport stdio|sse]       Start MCP server
-skill-mcp search QUERY [--k N]               Test search locally
-skill-mcp status                              Show skills/index/config status
-skill-mcp dedup                               Remove duplicate skills
+skill-mcp search QUERY [--k N]               Test search from terminal
+skill-mcp status                              Show what's loaded
+skill-mcp dedup                               Remove duplicates
 ```
 
-All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR` for custom data locations.
+All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR`.
 
 ## Development
 
@@ -163,7 +172,7 @@ pip install -e ".[all,dev]"
 pytest tests/ -v    # 132 tests, ~0.7s
 ```
 
-Architecture, design decisions, and extension guide: [`dev.md`](dev.md)
+Architecture and design decisions: [`dev.md`](dev.md)
 
 ## License
 
