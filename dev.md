@@ -223,7 +223,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 
 The server passes an `instructions` string during MCP initialization. This tells the agent what the knowledge base contains and how tools relate to each other (search → get_skill workflow), so the agent can decide when to search based on the task — no extra configuration or agent-specific instruction files needed.
 
-This is set via `Server(name, instructions=...)` in `server.py`. The instructions describe the knowledge base content and the tool workflow, but do **not** prescribe specific trigger conditions — that decision is left to the agent, matching how classic skill systems work.
+This is set via `Server(name, instructions=...)` in `server.py`. The instructions describe the knowledge base content, the search → get_skill workflow, and proactive trigger conditions (unfamiliar technologies, config files, best practices). Tool descriptions list concrete scenarios to help agents recognize when to search autonomously.
 
 ## MCP Tool Interface
 
@@ -234,7 +234,7 @@ This is set via `Server(name, instructions=...)` in `server.py`. The instruction
 → [{"id": "a1b2", "name": "...", "description": "...", "score": 0.81, "category": "...", "tags": [...]}]
 ```
 
-Semantic search. Returns summaries only (no `instructions`) to save context tokens. Tool description includes behavioral guidance ("Use this BEFORE starting any task...") so agents know when to call it.
+Semantic search. Returns summaries only (no `instructions`) to save context tokens. Tool description lists concrete trigger scenarios (config files, new frameworks, design patterns, debugging, "how to" questions) so agents recognize when to search autonomously.
 
 ### get_skill
 
@@ -252,7 +252,7 @@ Fetch full instructions. Tool description references the search → get_skill wo
 → [{"id": "...", "name": "...", "description": "...", ...}]
 ```
 
-FTS5 text search. Works without vector index. Special characters auto-escaped. Tool description differentiates from semantic search ("Use when you have specific terms").
+FTS5 text search. Works without vector index. Special characters auto-escaped. Tool description steers agents to prefer this over `search_skills` when they have specific tool names, error messages, or CLI commands.
 
 ### list_categories
 
