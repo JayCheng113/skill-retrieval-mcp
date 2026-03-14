@@ -30,23 +30,23 @@
           └─────────────────────┘
 ```
 
-Total: **~1750 lines** across 16 source files.
+~1850 lines across 16 source files.
 
 ## Module Responsibilities
 
 | Module | Lines | Role |
 |--------|-------|------|
-| `cli.py` | 494 | CLI commands, orchestration, no business logic |
-| `store.py` | 250 | SQLite CRUD + FTS5, dedup-on-insert, merge |
-| `server.py` | 240 | MCP protocol handlers, read-only runtime |
-| `index.py` | 141 | FAISS build/update/search/save/load |
-| `embeddings.py` | 111 | Backend abstraction (ST, OpenAI, Ollama, mock) |
+| `cli.py` | 542 | CLI commands, orchestration, no business logic |
+| `server.py` | 285 | MCP protocol handlers, structured logging, read-only runtime |
+| `store.py` | 250 | SQLite CRUD + FTS5, dedup-on-insert, batch commit, merge |
+| `index.py` | 139 | FAISS build/update/search/save/load |
+| `embeddings.py` | 112 | Backend abstraction (ST, OpenAI, Ollama, mock) |
 | `config.py` | 109 | YAML config with computed paths |
-| `schema.py` | 87 | `Skill` dataclass, deterministic ID/hash |
-| `hub.py` | 58 | HuggingFace download (DB + index) |
+| `schema.py` | 89 | `Skill` dataclass, deterministic ID/hash |
+| `hub.py` | 60 | HuggingFace download (DB + index by backend/model) |
 | `retriever.py` | 37 | query → embed → FAISS search → store lookup |
 | `dedup.py` | 28 | Source-priority dedup by content_hash |
-| `importers/` | ~120 | Directory, LangSkills, Anthropic parsers |
+| `importers/` | ~130 | Directory, LangSkills, Anthropic parsers + shared frontmatter |
 
 ## Data Model
 
@@ -77,6 +77,21 @@ skills (id PK, name, description, instructions, source, source_id,
 - Metadata: `skill_ids.json` = `{skill_ids: [...], dimension: int, embedding: {backend, model}}`
 - No deletion support in FAISS → deletions require full rebuild
 
+### HuggingFace Layout
+
+```
+zcheng256/skillretrieval-data (dataset repo)
+├── processed/skills.db                                    960MB
+├── indices/sentence-transformers/all-MiniLM-L6-v2/        137MB  (384-dim)
+│   ├── index.faiss
+│   └── skill_ids.json
+└── indices/openai/text-embedding-3-large/                 1.1GB  (3072-dim)
+    ├── index.faiss
+    └── skill_ids.json
+```
+
+`pull --include-index` downloads the index matching `config.embedding.backend/model`. `download_index()` in `hub.py` constructs the path as `indices/{backend}/{model}/`.
+
 ## Key Design Decisions
 
 ### Dedup happens at insert time, not as a batch
@@ -87,7 +102,7 @@ skills (id PK, name, description, instructions, source, source_id,
 ANTHROPIC(4) > COMMUNITY(3) > LANGSKILLS(2) > SKILLNET(1)
 ```
 
-Higher priority replaces lower. Equal or lower is silently skipped. This means the `dedup` CLI command only catches duplicates injected via raw SQL (bypassing `_add_skill_detail`).
+Higher priority replaces lower. Equal or lower is silently skipped. The `dedup` CLI command only catches duplicates injected via raw SQL (bypassing `_add_skill_detail`).
 
 ### Commit strategy: batch, not per-row
 
@@ -96,9 +111,9 @@ Higher priority replaces lower. Equal or lower is silently skipped. This means t
 ### Incremental indexing
 
 `SkillIndex.update()` computes `store_ids - indexed_ids`:
-- Empty diff → "up to date" (0)
-- New IDs → encode only delta, `index.add()` appends (-1 if deletions detected, triggering full rebuild)
-- FAISS `IndexFlatIP.add()` supports append but not removal
+- Empty diff → "up to date" (returns 0)
+- New IDs → encode only delta, `index.add()` appends (returns count)
+- Indexed IDs missing from store → deletions detected (returns -1, triggers full rebuild)
 
 ### Embedding consistency
 
@@ -117,15 +132,16 @@ pull
  └─ DB has skills → merge_from (preserves custom skills)
 ```
 
-After copy, `_rebuild_fts` creates FTS tables + triggers via `SkillStore._init_db` (single source of truth for schema), then triggers `INSERT INTO skills_fts(skills_fts) VALUES('rebuild')`.
+After copy, `_rebuild_fts` reuses `SkillStore._init_db` (single source of truth for FTS schema), then triggers a full FTS rebuild.
 
-### FTS5 content-sync
+### Logging
 
-The FTS table is a content-sync table (`content='skills'`). Triggers keep it in sync:
-- `AFTER INSERT` → adds to FTS
-- `AFTER DELETE` → removes from FTS
+`server.py` uses Python `logging` module (`logger = logging.getLogger("skill_mcp")`):
+- Startup: store/index load status, backend/model, transport
+- Each tool call: name + latency in ms
+- Warnings: missing store, missing index, skill not found
 
-Schema is defined once in `SkillStore._init_db`. `_rebuild_fts` reuses it by constructing a `SkillStore`, which calls `_init_db`, then triggers a full rebuild command.
+CLI exposes `--log-level` (or env `SKILL_MCP_LOG_LEVEL`). `serve` defaults to INFO.
 
 ## Extension Points
 
@@ -133,13 +149,12 @@ Schema is defined once in `SkillStore._init_db`. `_rebuild_fts` reuses it by con
 
 1. Add branch in `EmbeddingModel.__init__` and `encode`
 2. Add optional dependency in `pyproject.toml`
-3. That's it — no other files need changes
 
 ### Adding a new importer
 
 1. Create `importers/myformat.py` implementing `BaseImporter` protocol
-2. Add CLI branch in `import_skills` command
-3. Add source type to `click.Choice`
+2. Use `split_frontmatter()` from `importers/frontmatter.py` if parsing SKILL.md
+3. Add CLI branch in `import_skills` command + `click.Choice`
 
 ### Adding a new MCP tool
 
@@ -155,7 +170,7 @@ Schema is defined once in `SkillStore._init_db`. `_rebuild_fts` reuses it by con
 ## Config
 
 ```yaml
-data_dir: ~/.skill-mcp         # all data lives here
+data_dir: ~/.skill-mcp
 embedding:
   backend: sentence-transformers
   model: all-MiniLM-L6-v2
@@ -166,9 +181,9 @@ search:
   default_k: 5
 ```
 
-Resolution order: CLI `--data-dir` → env `SKILL_MCP_DATA_DIR` → config.yaml `data_dir` → default `~/.skill-mcp`
+Resolution order: CLI `--data-dir` → env `SKILL_MCP_DATA_DIR` → config.yaml → default `~/.skill-mcp`
 
-Config is saved by `build-index` (to record which backend/model was used). Never overwritten by `pull`.
+Config is saved by `build-index` (records which backend/model was used). Never overwritten by `pull`.
 
 ## File Layout
 
@@ -184,21 +199,24 @@ Config is saved by `build-index` (to record which backend/model was used). Never
 ## Testing
 
 ```bash
-pytest tests/test_workflow.py -v    # 110 tests, ~0.7s
+pytest tests/ -v    # 126 tests, ~0.7s
 ```
 
-Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download). Key test categories:
+Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
 
-| Category | Count | What it covers |
-|----------|-------|----------------|
-| E2E workflow | 15 | init → import → build → search lifecycle |
+| Category | Tests | Coverage |
+|----------|-------|----------|
+| E2E workflow | 15 | init → import → build → search full lifecycle |
 | Cross-feature | 9 | pull+import+build, incremental, dedup+rebuild |
 | Server handlers | 11 | null store, invalid IDs, special chars, k=0 |
-| Store edge cases | 14 | merge priority, empty source, FTS sync |
-| Index | 12 | incremental, deletion detection, save/load, empty |
-| Pull command | 8 | merge, replace, dedup, fast path, stale index |
+| Store | 14 | merge priority, empty source, FTS sync, batch |
+| Index | 12 | incremental, deletion detection, save/load |
+| Pull | 8 | merge, replace, dedup, fast path, stale index |
+| Retriever | 5 | stale index, k > total, metadata |
 | Schema/Config/FTS | 12 | partial YAML, roundtrip, special chars |
-| Others | 29 | importers, dedup, embedding model, data-dir |
+| Importers/Dedup/Embedding | 14 | nested dirs, source compat, mock backend |
+| Data-dir/CLI | 10 | global override, envvar, nonexistent path |
+| Source compat | 2 | SKILLNET store + dedup priority |
 
 ## MCP Tool Interface
 
@@ -218,8 +236,6 @@ Returns summaries only (no `instructions`) to save context tokens.
 → {"id": "...", "name": "...", "instructions": "full text...", ...}
 ```
 
-Returns full instructions. Call after `search_skills` for the skills you need.
-
 ### keyword_search
 
 ```json
@@ -227,7 +243,7 @@ Returns full instructions. Call after `search_skills` for the skills you need.
 → [{"id": "...", "name": "...", "description": "...", ...}]
 ```
 
-FTS5 text search. Works without vector index. Handles special characters via automatic escaping.
+FTS5 text search. Works without vector index. Special characters auto-escaped.
 
 ### list_categories
 
@@ -238,7 +254,7 @@ FTS5 text search. Works without vector index. Handles special characters via aut
 
 ## Dependencies
 
-Core (always installed): `mcp`, `faiss-cpu`, `numpy`, `click`, `pyyaml`, `tqdm`
+Core: `mcp`, `faiss-cpu`, `numpy`, `click`, `pyyaml`, `tqdm`
 
 Optional:
 - `[local]` — `sentence-transformers` (default embedding backend)
@@ -246,5 +262,5 @@ Optional:
 - `[ollama]` — `httpx`
 - `[hf]` — `huggingface-hub` (for `pull`)
 - `[sse]` — `starlette`, `uvicorn` (SSE transport)
-- `[all]` — everything above
+- `[all]` — all optional deps
 - `[dev]` — `pytest`, `pytest-asyncio`, `ruff`

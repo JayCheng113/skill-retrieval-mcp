@@ -15,31 +15,28 @@ Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any M
 
 ## Quick Start
 
-**2 commands to go from zero to 89K searchable skills:**
-
 ```bash
+# 1. Install
 pip install "skill-retrieval-mcp[local,hf]"
-skill-mcp pull --include-index    # download 89K skills + pre-built vector index
+
+# 2. Download 89K skills + pre-built vector index
+skill-mcp pull --include-index
+
+# 3. Register with your agent
+skill-mcp init                   # interactive — auto-detects Claude Code, Cursor
 ```
 
-That's it. Register with your agent and start using:
-
-```bash
-# Claude Code — auto-registers during init
-skill-mcp init
-
-# Or add manually to ~/.claude/settings.json
-```
+Or register manually:
 
 ```json
 {"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}
 ```
 
-> `--include-index` downloads a pre-built vector index so you skip the local embedding step entirely. Without it, run `skill-mcp build-index` to build locally (~7 min on CPU).
+Done. Your agent now has 4 tools: `search_skills`, `get_skill`, `keyword_search`, `list_categories`.
 
-## How Your Agent Uses It
+## How It Works
 
-The server exposes 4 tools. The typical flow is **search → fetch**:
+The agent calls **search → fetch** as needed:
 
 ```
 Agent: search_skills({"query": "debug memory leak in python", "k": 3})
@@ -49,28 +46,16 @@ Agent: get_skill({"skill_id": "a1b2"})
 → {"instructions": "Memory leaks cause applications to consume increasing RAM..."}
 ```
 
+`search_skills` returns summaries only (no instructions) to save context tokens. The agent calls `get_skill` for the ones it actually needs.
+
 | Tool | What it does |
 |------|-------------|
-| `search_skills` | Semantic search — returns top-k skill summaries with scores |
-| `get_skill` | Fetch full instructions for a skill by ID |
+| `search_skills` | Semantic search — top-k skill summaries with scores |
+| `get_skill` | Full instructions for a skill by ID |
 | `keyword_search` | FTS5 text search — works without vector index |
 | `list_categories` | Browse all skill categories and counts |
 
-`search_skills` returns summaries only (no full instructions) to save context tokens. Call `get_skill` for the ones you need.
-
-## Skill Loading
-
-### Use pre-built dataset (recommended)
-
-```bash
-skill-mcp pull                    # merge 89K skills into your store
-skill-mcp pull --include-index    # also download pre-built vector index
-skill-mcp pull --replace          # replace local DB entirely (discard custom skills)
-```
-
-`pull` **merges by default** — your custom skills are preserved. The dataset includes LangSkills, SkillNet, Anthropic official, and community sources, already deduplicated.
-
-### Add your own skills
+## Adding Your Own Skills
 
 Create `SKILL.md` files anywhere:
 
@@ -81,54 +66,47 @@ description: "Identify and fix memory leaks in long-running applications"
 tags: ["debugging", "memory", "profiling"]
 ---
 
-## Instructions
-
 Your detailed skill instructions here...
 ```
 
-Then import and index:
+Import and index:
 
 ```bash
 skill-mcp import --source directory --path ~/my-skills/
 skill-mcp build-index             # incremental — only encodes new skills
 ```
 
-### Mixed usage (HF + custom)
-
-```bash
-skill-mcp pull                    # 89K pre-built skills
-skill-mcp import --source directory --path ~/my-skills/   # add yours
-skill-mcp build-index             # encodes only your new skills, keeps the rest
-```
-
-Deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.
+This works alongside pre-built skills from `pull`. Deduplication is automatic (priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET).
 
 ## Embedding Backends
 
-Default: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, local, free, no API key).
+Default: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, local, free).
 
 | Backend | Install | Pre-built index | Requires |
 |---------|---------|-----------------|----------|
-| `sentence-transformers` | `pip install skill-retrieval-mcp[local]` | available via `--include-index` (137MB) | Nothing |
-| `openai` | `pip install skill-retrieval-mcp[openai]` | available via `--include-index` (1.1GB) | `OPENAI_API_KEY` |
-| `ollama` | `pip install skill-retrieval-mcp[ollama]` | not available, build locally | Ollama running |
+| `sentence-transformers` | `pip install skill-retrieval-mcp[local]` | `--include-index` (137MB) | Nothing |
+| `openai` | `pip install skill-retrieval-mcp[openai]` | `--include-index` (1.1GB) | `OPENAI_API_KEY` |
+| `ollama` | `pip install skill-retrieval-mcp[ollama]` | build locally | Ollama running |
 
-`pull --include-index` downloads the pre-built index matching your configured backend. To switch backends:
+To switch backends:
 
 ```bash
-# Option A: build locally with a different backend
 skill-mcp build-index --backend openai --model text-embedding-3-large --force
-
-# Option B: download pre-built index for a different backend
-# 1. Update config (~/.skill-mcp/config.yaml):
-#      embedding:
-#        backend: openai
-#        model: text-embedding-3-large
-# 2. Then pull the matching index:
-skill-mcp pull --include-index
 ```
 
-One index = one embedding model. All vectors must come from the same model. `build-index` detects model changes and requires `--force` to rebuild.
+One index = one embedding model. `build-index` detects model mismatches and requires `--force` to rebuild.
+
+## Pull Options
+
+`pull` merges by default — your custom skills are preserved.
+
+```bash
+skill-mcp pull                    # merge 89K skills into local store
+skill-mcp pull --include-index    # also download pre-built vector index
+skill-mcp pull --replace          # replace local DB entirely (discard custom skills)
+```
+
+Without `--include-index`, run `skill-mcp build-index` to build the vector index locally (~7 min on CPU).
 
 ## CLI Reference
 
@@ -151,7 +129,7 @@ All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR` for custom loc
 git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
-pytest tests/ -v                  # 110 tests
+pytest tests/ -v
 ```
 
 Architecture, data model, and extension guide: [`dev.md`](dev.md)
