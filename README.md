@@ -54,7 +54,9 @@ That's it. Your agent now has access to 89K searchable skills.
 
 ## How Your Agent Uses It
 
-The agent calls **search → fetch** as needed:
+The server provides **server instructions** during MCP initialization, telling the agent what the knowledge base contains and how to use the tools. The agent then decides when to search based on the task at hand — no manual prompting needed.
+
+The workflow is **search → fetch**:
 
 ```
 Agent: search_skills({"query": "debug memory leak in python", "k": 3})
@@ -66,12 +68,12 @@ Agent: get_skill({"skill_id": "a1b2"})
 
 `search_skills` returns summaries only (no instructions) to save context tokens. The agent calls `get_skill` for the ones it needs.
 
-| Tool | What it does |
-|------|-------------|
-| `search_skills` | Semantic search — top-k skill summaries with scores |
-| `get_skill` | Full instructions for a skill by ID |
-| `keyword_search` | FTS5 text search — works without vector index |
-| `list_categories` | Browse all skill categories and counts |
+| Tool | When to use | What it returns |
+|------|-------------|-----------------|
+| `search_skills` | Semantic search — when the user describes a task in natural language | Top-k skill summaries with relevance scores |
+| `keyword_search` | Keyword search — when you have specific terms (tool names, error messages) | Matching skill summaries via FTS5 |
+| `get_skill` | After search — fetch full instructions for a skill you want to apply | Complete skill with step-by-step instructions |
+| `list_categories` | Discovery — browse what domains are covered | Category names and skill counts |
 
 ## Add Your Own Skills
 

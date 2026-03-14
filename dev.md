@@ -37,7 +37,7 @@
 | Module | Lines | Role |
 |--------|-------|------|
 | `cli.py` | 542 | CLI commands, orchestration, no business logic |
-| `server.py` | 285 | MCP protocol handlers, structured logging, read-only runtime |
+| `server.py` | 295 | MCP protocol handlers, server instructions, structured logging, read-only runtime |
 | `store.py` | 250 | SQLite CRUD + FTS5, dedup-on-insert, batch commit, merge |
 | `index.py` | 139 | FAISS build/update/search/save/load |
 | `embeddings.py` | 112 | Backend abstraction (ST, OpenAI, Ollama, mock) |
@@ -199,7 +199,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 126 tests, ~0.7s
+pytest tests/ -v    # 132 tests, ~0.7s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
@@ -209,6 +209,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | E2E workflow | 15 | init → import → build → search full lifecycle |
 | Cross-feature | 9 | pull+import+build, incremental, dedup+rebuild |
 | Server handlers | 11 | null store, invalid IDs, special chars, k=0 |
+| Tool descriptions | 6 | behavioral triggers, workflow references, use-case context |
 | Store | 14 | merge priority, empty source, FTS sync, batch |
 | Index | 12 | incremental, deletion detection, save/load |
 | Pull | 8 | merge, replace, dedup, fast path, stale index |
@@ -217,6 +218,12 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | Importers/Dedup/Embedding | 14 | nested dirs, source compat, mock backend |
 | Data-dir/CLI | 10 | global override, envvar, nonexistent path |
 | Source compat | 2 | SKILLNET store + dedup priority |
+
+## MCP Server Instructions
+
+The server passes an `instructions` string during MCP initialization. This tells the agent what the knowledge base contains and how tools relate to each other (search → get_skill workflow), so the agent can decide when to search based on the task — no extra configuration or agent-specific instruction files needed.
+
+This is set via `Server(name, instructions=...)` in `server.py`. The instructions describe the knowledge base content and the tool workflow, but do **not** prescribe specific trigger conditions — that decision is left to the agent, matching how classic skill systems work.
 
 ## MCP Tool Interface
 
@@ -227,7 +234,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 → [{"id": "a1b2", "name": "...", "description": "...", "score": 0.81, "category": "...", "tags": [...]}]
 ```
 
-Returns summaries only (no `instructions`) to save context tokens.
+Semantic search. Returns summaries only (no `instructions`) to save context tokens. Tool description includes behavioral guidance ("Use this BEFORE starting any task...") so agents know when to call it.
 
 ### get_skill
 
@@ -236,6 +243,8 @@ Returns summaries only (no `instructions`) to save context tokens.
 → {"id": "...", "name": "...", "instructions": "full text...", ...}
 ```
 
+Fetch full instructions. Tool description references the search → get_skill workflow.
+
 ### keyword_search
 
 ```json
@@ -243,7 +252,7 @@ Returns summaries only (no `instructions`) to save context tokens.
 → [{"id": "...", "name": "...", "description": "...", ...}]
 ```
 
-FTS5 text search. Works without vector index. Special characters auto-escaped.
+FTS5 text search. Works without vector index. Special characters auto-escaped. Tool description differentiates from semantic search ("Use when you have specific terms").
 
 ### list_categories
 
@@ -251,6 +260,8 @@ FTS5 text search. Works without vector index. Special characters auto-escaped.
 {}
 → [{"category": "debugging", "count": 42}, ...]
 ```
+
+Tool description includes use-case context ("discover what domains are covered").
 
 ## Dependencies
 

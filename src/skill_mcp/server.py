@@ -19,7 +19,16 @@ from skill_mcp.store import SkillStore
 
 logger = logging.getLogger("skill_mcp")
 
-server = Server("skill-retrieval")
+server = Server(
+    "skill-retrieval",
+    instructions=(
+        "A knowledge base of 89K+ skills is available — covering tools, frameworks, "
+        "languages, DevOps, cloud, ML, and more. Each skill contains a structured "
+        "how-to guide with best practices and step-by-step instructions. "
+        "Use search_skills (semantic) or keyword_search (exact terms) to find relevant "
+        "skills, then get_skill to fetch full instructions."
+    ),
+)
 
 # Module-level state, loaded at startup
 _store: SkillStore | None = None
