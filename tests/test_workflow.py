@@ -60,7 +60,16 @@ def populated_data_dir(data_dir, skills_dir, runner):
     assert result.exit_code == 0
     result = runner.invoke(
         main,
-        ["--data-dir", str(data_dir), "import", "--source", "directory", "--no-index", "--path", str(skills_dir)],
+        [
+            "--data-dir",
+            str(data_dir),
+            "import",
+            "--source",
+            "directory",
+            "--no-index",
+            "--path",
+            str(skills_dir),
+        ],
     )
     assert result.exit_code == 0
     result = runner.invoke(

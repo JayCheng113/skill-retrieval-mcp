@@ -315,9 +315,7 @@ def _pull_index(config) -> None:
 @click.option(
     "--db", type=click.Path(), default=None, help="Database path (default: ~/.skill-mcp/skills.db)"
 )
-@click.option(
-    "--no-index", is_flag=True, help="Skip automatic index update after import"
-)
+@click.option("--no-index", is_flag=True, help="Skip automatic index update after import")
 @click.pass_context
 def import_skills(ctx, source: str, source_path: str, db: str | None, no_index: bool):
     """Import skills from a source into the store.
