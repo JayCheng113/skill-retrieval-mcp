@@ -28,7 +28,8 @@ server = Server(
         "Each skill is a structured best-practice guide. "
         "Workflow: search_skills (semantic) or keyword_search (exact terms) → "
         "review summaries → get_skill to fetch full instructions. "
-        "Search is < 5ms with zero API calls — when in doubt, search."
+        "Search is < 5ms with zero API calls — when in doubt, search. "
+        "If no relevant skill is found, fall back to web search or other tools."
     ),
 )
 
