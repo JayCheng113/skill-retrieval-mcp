@@ -1,6 +1,6 @@
 # skill-retrieval-mcp
 
-> Your agent doesn't need 200K skills in context. It needs the right 5.
+> Your agent doesn't need you to find the right skills. It needs to search 89K of them on its own.
 
 An MCP server that gives AI agents on-demand access to **89K+ skills** covering virtually every technical domain. The agent searches as it works — the same way you look up docs mid-task.
 
@@ -8,15 +8,15 @@ Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any M
 
 ## The Problem
 
-You give your agent a skill — "always use TDD," "follow this API style" — and it works. But skills live in context, and context is finite:
+You give your agent a skill — "always use TDD," "follow this API style" — and it works. But manually installing skills doesn't scale:
 
-- **Pre-load 10 skills?** The agent knows 10 things. Everything else, it guesses.
-- **Pre-load 100?** You're burning tokens on 95 irrelevant skills per task.
-- **Pre-load 1000?** You can't. Context window says no.
+- **You don't know what exists.** There are thousands of skills out there. You install the 10 you happen to find — everything else, the agent guesses.
+- **You can't install what you can't name.** Mid-task, the agent needs a skill for "OIDC-based PyPI publishing" — but you'd never think to install that in advance.
+- **89K skills can't live in `~/.claude/skills/`.** Even with lazy loading, thousands of skill descriptions bloat the system prompt.
 
 ## The Fix
 
-Don't load skills. **Search them.**
+Don't install skills upfront. **Search them at runtime.**
 
 ```
 You: "Help me set up CI/CD for this Python project"
@@ -53,12 +53,12 @@ Key behaviors:
 
 89K skills. < 5ms search. Zero LLM calls. Runs locally.
 
-| | Pre-loading skills | skill-retrieval-mcp |
+| | Installing skills manually | skill-retrieval-mcp |
 |---|---|---|
-| **Scale** | 10–20 max | 89K+ |
+| **Scale** | Dozens, if you're diligent | 89K+ |
+| **Discovery** | You find and install each one | Agent searches by need |
 | **Selection** | You pick upfront | Agent picks per-task |
-| **Context cost** | All loaded always | Top-k on demand |
-| **Search** | — | < 5ms, local FAISS |
+| **Search** | Name matching on descriptions | Semantic, < 5ms, local FAISS |
 
 ## Quick Start
 
