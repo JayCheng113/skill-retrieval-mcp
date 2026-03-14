@@ -2,156 +2,76 @@
 
 > Your agent doesn't need 200K skills in context. It needs the right 5.
 
-A lightweight MCP Server that brings **RAG (Retrieval-Augmented Generation) to skill loading**. Instead of pre-loading all available skills into your AI agent's context window, `skill-retrieval-mcp` dynamically retrieves only the most relevant skills for the current task — with zero LLM calls and millisecond latency.
+An MCP server that brings **RAG to skill loading**. Instead of pre-loading all skills into your agent's context, it retrieves only the most relevant ones per task — zero LLM calls, millisecond latency.
 
-Works with any MCP-compatible agent: **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and more.
-
-## Why?
-
-Modern skill libraries contain **100K+ skills** (LangSkills, Anthropic official, community). But agents can only keep **10–20 skills** in context at a time. Pre-loading is a dead end.
-
-`skill-retrieval-mcp` solves this:
+Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any MCP-compatible agent.
 
 | | Pre-loading | skill-retrieval-mcp |
 |---|---|---|
-| **Scale** | 10–20 skills | 200K+ skills |
-| **Selection** | Manual / static | Automatic by semantic relevance |
-| **Latency** | N/A | < 5ms per query |
-| **LLM calls** | 0 | 0 |
-| **Context cost** | All skills always loaded | Only top-k relevant skills |
+| **Scale** | 10–20 skills | 200K+ |
+| **Selection** | Manual | Semantic similarity |
+| **Latency** | — | < 5ms |
+| **Context cost** | All loaded | Top-k only |
 
 ## Quick Start
 
-```bash
-# Install (with local embeddings)
-pip install "skill-retrieval-mcp[local,hf]"
+**3 commands to go from zero to 89K searchable skills:**
 
-# Initialize
+```bash
+pip install "skill-retrieval-mcp[local,hf]"
+skill-mcp pull                    # download 89K pre-built skills from HuggingFace
+skill-mcp build-index             # build vector index locally (~2 min)
+```
+
+That's it. Register with your agent and start using:
+
+```bash
+# Claude Code — auto-registers during init
 skill-mcp init
 
-# Pull pre-built dataset (~89K skills, deduplicated, ready to use)
-skill-mcp pull
-
-# Build the vector index
-skill-mcp build-index --backend sentence-transformers
-
-# Done — your agent can now use search_skills, get_skill, etc.
+# Or add manually to ~/.claude/settings.json
 ```
 
-`skill-mcp pull` downloads a curated, pre-deduplicated skill database from [HuggingFace](https://huggingface.co/datasets/zcheng256/skillretrieval-data) so you can skip manual import entirely. Alternatively, import your own skills:
+```json
+{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}
+```
+
+## How Your Agent Uses It
+
+The server exposes 4 tools. The typical flow is **search → fetch**:
+
+```
+Agent: search_skills({"query": "debug memory leak in python", "k": 3})
+→ [{"id": "a1b2", "name": "debug-memory-leak", "score": 0.81, ...}, ...]
+
+Agent: get_skill({"skill_id": "a1b2"})
+→ {"instructions": "Memory leaks cause applications to consume increasing RAM..."}
+```
+
+| Tool | What it does |
+|------|-------------|
+| `search_skills` | Semantic search — returns top-k skill summaries with scores |
+| `get_skill` | Fetch full instructions for a skill by ID |
+| `keyword_search` | FTS5 text search — works without vector index |
+| `list_categories` | Browse all skill categories and counts |
+
+`search_skills` returns summaries only (no full instructions) to save context tokens. Call `get_skill` for the ones you need.
+
+## Skill Loading
+
+### Use pre-built dataset (recommended)
 
 ```bash
-skill-mcp import --source directory --path ~/my-skills/
+skill-mcp pull                    # merge 89K skills into your store
+skill-mcp pull --include-index    # also download pre-built vector index
+skill-mcp pull --replace          # replace local DB entirely (discard custom skills)
 ```
 
-## How It Works
+`pull` **merges by default** — your custom skills are preserved. The dataset includes LangSkills, SkillNet, Anthropic official, and community sources, already deduplicated.
 
-```
-                    ┌──────────────────────┐
-                    │   Your AI Agent      │
-                    │ (Claude Code, etc.)  │
-                    └──────────┬───────────┘
-                               │ MCP Protocol
-                    ┌──────────▼───────────┐
-                    │   skill-mcp serve    │
-                    │                      │
-                    │  search_skills(query)│──→ FAISS vector search
-                    │  get_skill(id)       │──→ SQLite lookup
-                    │  keyword_search(q)   │──→ FTS5 text search
-                    │  list_categories()   │──→ Category index
-                    └──────────────────────┘
-                         ▲            ▲
-                    skills.db    index.faiss
-                    (SQLite)      (FAISS)
-```
+### Add your own skills
 
-**Offline/Online separation**: Import skills and build indices offline via CLI. The MCP server only does read-only queries at runtime — fast and stateless.
-
-## MCP Tools
-
-The server exposes 4 tools to your agent:
-
-### `search_skills` — Semantic search (main tool)
-
-Find the most relevant skills for a task by semantic similarity.
-
-```json
-{"query": "debug memory leak in python", "k": 5}
-```
-
-Returns summaries (not full instructions) to save context tokens:
-
-```json
-[
-  {"id": "abc123", "name": "debug-memory-leak", "description": "Identify and fix memory leaks...", "score": 0.81, "category": "debugging", "tags": ["memory", "profiling"]},
-  {"id": "def456", "name": "debug-python", "description": "Systematic debugging techniques...", "score": 0.50, ...}
-]
-```
-
-### `get_skill` — Full skill content
-
-Fetch the complete instructions for a specific skill (two-step pattern: search first, then fetch what you need):
-
-```json
-{"skill_id": "abc123"}
-```
-
-### `keyword_search` — FTS5 text search
-
-Keyword-based search. Works even without a vector index built:
-
-```json
-{"query": "docker deploy", "limit": 10}
-```
-
-### `list_categories` — Browse categories
-
-```json
-→ [{"category": "debugging", "count": 12}, {"category": "testing", "count": 8}, ...]
-```
-
-## Retrieval Quality
-
-With `all-MiniLM-L6-v2` (384-dim, local, free):
-
-| Query | Top-1 Result | Score |
-|-------|-------------|-------|
-| "debug memory leak in python" | debug-memory-leak | 0.81 |
-| "resolve git merge conflicts" | git-resolve-conflicts | 0.76 |
-| "containerize my app with docker" | docker-containerize | 0.66 |
-| "design a REST API" | rest-api-design | 0.59 |
-| "write unit tests with pytest" | write-unit-tests | 0.45 |
-
-## Skill Sources
-
-### Pre-built dataset (recommended)
-
-```bash
-# Download 89K curated skills from HuggingFace and merge into local store
-skill-mcp pull
-
-# Also download a pre-built vector index (skips build-index entirely)
-skill-mcp pull --include-index
-
-# Replace local DB entirely instead of merging
-skill-mcp pull --replace
-```
-
-`pull` **merges by default** — your custom skills are preserved. The pre-built dataset includes LangSkills, SkillNet, Anthropic official, and community sources, already deduplicated. Requires `pip install skill-retrieval-mcp[hf]`.
-
-### Adding your own skills
-
-```bash
-# Import from a directory of SKILL.md files
-skill-mcp import --source directory --path ~/my-skills/
-
-# build-index is incremental — only encodes your new skills
-skill-mcp build-index
-```
-
-Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.
-
-### SKILL.md Format
+Create `SKILL.md` files anywhere:
 
 ```markdown
 ---
@@ -165,134 +85,55 @@ tags: ["debugging", "memory", "profiling"]
 Your detailed skill instructions here...
 ```
 
-## Embedding Backends
-
-Configurable via `~/.skill-mcp/config.yaml` or CLI flags:
-
-| Backend | Model | Dimensions | Requires |
-|---------|-------|-----------|----------|
-| `sentence-transformers` | all-MiniLM-L6-v2 | 384 | `pip install skill-retrieval-mcp[local]` |
-| `openai` | text-embedding-3-large | 3072 | `pip install skill-retrieval-mcp[openai]` + API key |
-| `ollama` | nomic-embed-text | 768 | `pip install skill-retrieval-mcp[ollama]` + Ollama running |
+Then import and index:
 
 ```bash
-# Build with local model (free, offline)
-skill-mcp build-index --backend sentence-transformers --model all-MiniLM-L6-v2
-
-# Build with OpenAI (highest quality)
-skill-mcp build-index --backend openai --model text-embedding-3-large
-
-# Rebuild with different backend
-skill-mcp build-index --backend ollama --model nomic-embed-text --force
+skill-mcp import --source directory --path ~/my-skills/
+skill-mcp build-index             # incremental — only encodes new skills
 ```
+
+### Mixed usage (HF + custom)
+
+```bash
+skill-mcp pull                    # 89K pre-built skills
+skill-mcp import --source directory --path ~/my-skills/   # add yours
+skill-mcp build-index             # encodes only your new skills, keeps the rest
+```
+
+Deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.
+
+## Embedding Backends
+
+Default: `sentence-transformers/all-MiniLM-L6-v2` (384-dim, local, free, no API key).
+
+```bash
+skill-mcp build-index                                              # default (local)
+skill-mcp build-index --backend openai --model text-embedding-3-large   # highest quality
+skill-mcp build-index --backend ollama --model nomic-embed-text    # self-hosted
+```
+
+| Backend | Install | Requires |
+|---------|---------|----------|
+| `sentence-transformers` | `pip install skill-retrieval-mcp[local]` | Nothing |
+| `openai` | `pip install skill-retrieval-mcp[openai]` | `OPENAI_API_KEY` |
+| `ollama` | `pip install skill-retrieval-mcp[ollama]` | Ollama running locally |
+
+Switching backends requires `--force` to rebuild the index.
 
 ## CLI Reference
 
 ```
-skill-mcp init [--data-dir DIR] [--no-register]   Initialize data directory and config
-skill-mcp pull [--replace] [--include-index]        Download/merge pre-built dataset from HuggingFace
-skill-mcp import --source SOURCE --path PATH       Import skills into the store
-skill-mcp build-index [--backend B] [--model M]    Build FAISS vector index
-skill-mcp serve [--transport stdio|sse]            Start MCP server
-skill-mcp search QUERY [--k N]                     Local search (for testing)
-skill-mcp status                                   Show store/index/config status
-skill-mcp dedup                                    Run cross-source deduplication
+skill-mcp init [--no-register]              Create data dir, config, register with agents
+skill-mcp pull [--replace] [--include-index] Download/merge pre-built dataset from HuggingFace
+skill-mcp import --source SOURCE --path PATH Import skills from directory/langskills/anthropic
+skill-mcp build-index [--backend B] [--force] Build or incrementally update vector index
+skill-mcp serve [--transport stdio|sse]      Start MCP server
+skill-mcp search QUERY [--k N]              Test search locally
+skill-mcp status                            Show skills/index/config status
+skill-mcp dedup                             Remove duplicate skills
 ```
 
-All commands respect `--data-dir` (or env `SKILL_MCP_DATA_DIR`) for custom data locations.
-
-## Configuration
-
-`~/.skill-mcp/config.yaml` (created by `skill-mcp init`, optional — defaults are used if missing):
-
-```yaml
-embedding:
-  backend: sentence-transformers
-  model: all-MiniLM-L6-v2
-
-server:
-  transport: stdio
-  name: skill-retrieval
-
-search:
-  default_k: 5
-```
-
-## Agent Integration
-
-### Claude Code
-
-```bash
-skill-mcp init  # select "yes" when prompted to register
-```
-
-Or manually add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "skill-retrieval": {
-      "command": "skill-mcp",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-### Cursor
-
-Add to `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "skill-retrieval": {
-      "command": "skill-mcp",
-      "args": ["serve"]
-    }
-  }
-}
-```
-
-### Any MCP-compatible Agent
-
-The server uses stdio transport by default. Point your agent's MCP config to `skill-mcp serve`.
-
-## Architecture
-
-```
-src/skill_mcp/
-├── server.py          # MCP Server — 4 tool handlers
-├── cli.py             # Click CLI — init/pull/import/build-index/serve/status/search
-├── hub.py             # HuggingFace Hub dataset download
-├── config.py          # YAML config loading with defaults
-├── store.py           # SQLite + FTS5 skill storage
-├── schema.py          # Skill/RetrievedSkill data models
-├── index.py           # FAISS vector index (build/search/save/load)
-├── embeddings.py      # Multi-backend embeddings (OpenAI/ST/Ollama/mock)
-├── retriever.py       # Vector similarity retrieval
-├── dedup.py           # Content-hash deduplication with source priority
-└── importers/         # Pluggable importers (directory/langskills/anthropic)
-```
-
-~16 source files total. No agent framework, no evaluation infrastructure, no experiment runners — just skill storage, indexing, and serving.
-
-## Scalability
-
-| Metric | Value |
-|--------|-------|
-| Max skills | 200K+ tested |
-| Index memory | ~300MB (384-dim × 200K) |
-| Search latency | < 5ms |
-| SQLite on disk | ~500MB for 200K skills |
-| Query embedding | ~10ms (local) / ~100ms (API) |
-
-## Dependencies
-
-**Core (6 packages)**:
-`mcp`, `faiss-cpu`, `numpy`, `click`, `pyyaml`, `tqdm`
-
-**Optional**: `sentence-transformers`, `openai`, `httpx` (Ollama), `huggingface-hub` (pull), `starlette`+`uvicorn` (SSE)
+All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR` for custom locations.
 
 ## Development
 
@@ -300,7 +141,7 @@ src/skill_mcp/
 git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
-pytest tests/ -v
+pytest tests/ -v                  # 83 tests
 ```
 
 ## License
