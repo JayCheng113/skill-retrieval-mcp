@@ -15,6 +15,7 @@ class SkillSource(str, Enum):
     LANGSKILLS = "langskills"
     ANTHROPIC = "anthropic"
     COMMUNITY = "community"
+    SKILLNET = "skillnet"
 
 
 @dataclass

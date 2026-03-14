@@ -6,9 +6,10 @@ from skill_mcp.schema import Skill, SkillSource
 
 # Higher number = higher priority
 _SOURCE_PRIORITY: dict[SkillSource, int] = {
-    SkillSource.ANTHROPIC: 3,
-    SkillSource.COMMUNITY: 2,
-    SkillSource.LANGSKILLS: 1,
+    SkillSource.ANTHROPIC: 4,
+    SkillSource.COMMUNITY: 3,
+    SkillSource.LANGSKILLS: 2,
+    SkillSource.SKILLNET: 1,
 }
 
 

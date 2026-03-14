@@ -64,8 +64,12 @@ def init(ctx, data_dir: str | None, no_register: bool):
         _try_register_mcp(data_path)
 
     click.echo("\nInitialization complete! Next steps:")
-    click.echo("  1. skill-mcp import --source directory --path <skills-dir>")
-    click.echo("  2. skill-mcp build-index --backend sentence-transformers")
+    click.echo("  Option A (quick start with 89K pre-built skills):")
+    click.echo("    skill-mcp pull")
+    click.echo("  Option B (import your own skills):")
+    click.echo("    skill-mcp import --source directory --path <skills-dir>")
+    click.echo("  Then build the search index:")
+    click.echo("    skill-mcp build-index --backend sentence-transformers")
 
 
 def _try_register_mcp(data_path: Path) -> None:
@@ -105,6 +109,52 @@ def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
         json.dump(data, f, indent=2)
 
     click.echo(f"  Registered in {path}")
+
+
+@main.command()
+@click.option("--force", is_flag=True, help="Overwrite existing database")
+@click.pass_context
+def pull(ctx, force: bool):
+    """Download pre-built skill dataset (~89K skills) from HuggingFace.
+
+    This is the fastest way to get started — downloads a ready-to-use
+    skills.db so you can skip manual import and dedup.
+
+    After pull, run `skill-mcp build-index` to create the vector index.
+    """
+    from skill_mcp.hub import pull_dataset
+
+    config = _load_config_from_ctx(ctx)
+    data_dir = config.resolved_data_dir
+
+    if not data_dir.exists():
+        # Auto-init if needed
+        from skill_mcp.config import Config, save_config
+        data_dir.mkdir(parents=True, exist_ok=True)
+        cfg = Config(data_dir=str(data_dir))
+        save_config(cfg)
+        click.echo(f"Initialized {data_dir}")
+
+    click.echo(f"Downloading skills dataset from HuggingFace...")
+    try:
+        result = pull_dataset(data_dir, force=force)
+    except FileExistsError as e:
+        click.echo(str(e))
+        return
+
+    db_path = result["db"]
+    # Verify the download
+    from skill_mcp.store import SkillStore
+    store = SkillStore(db_path, readonly=True)
+    count = store.count()
+    cats = store.categories()
+    store.close()
+
+    click.echo(f"Downloaded {count:,} skills to {db_path}")
+    if cats:
+        click.echo(f"Categories: {len(cats)} ({', '.join(cats[:5])}{'...' if len(cats) > 5 else ''})")
+    click.echo(f"\nNext step:")
+    click.echo(f"  skill-mcp build-index --backend sentence-transformers")
 
 
 @main.command("import")

@@ -616,3 +616,141 @@ class TestEmbeddingModel:
     def test_unsupported_backend(self):
         with pytest.raises(ValueError, match="Unsupported"):
             EmbeddingModel(backend="nonexistent")
+
+
+# ---------------------------------------------------------------------------
+# Pull command (HuggingFace download)
+# ---------------------------------------------------------------------------
+
+
+def _create_fake_hf_db(path: Path) -> Path:
+    """Create a small valid skills.db to simulate HF download."""
+    db_path = path / "fake_hf.db"
+    store = SkillStore(db_path)
+    for i in range(5):
+        store.add_skill(
+            Skill(
+                name=f"hf-skill-{i}",
+                description=f"HF skill {i}",
+                instructions=f"Instructions for HF skill {i}",
+                source=SkillSource.LANGSKILLS,
+                category="testing",
+            )
+        )
+    store.close()
+    return db_path
+
+
+class TestPull:
+    def test_pull_downloads_and_reports(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull should download DB and report skill count."""
+        fake_db = _create_fake_hf_db(tmp_path)
+
+        def mock_pull(dest_dir, force=False):
+            import shutil
+            dest = Path(dest_dir) / "skills.db"
+            shutil.copy2(fake_db, dest)
+            return {"db": dest}
+
+        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        # init first
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+        assert "5" in result.output  # 5 skills
+        assert "Next step" in result.output
+
+    def test_pull_refuses_overwrite_without_force(self, runner, data_dir, tmp_path, monkeypatch):
+        fake_db = _create_fake_hf_db(tmp_path)
+
+        call_count = 0
+
+        def mock_pull(dest_dir, force=False):
+            nonlocal call_count
+            call_count += 1
+            if not force:
+                raise FileExistsError("Database already exists. Use --force.")
+            import shutil
+            dest = Path(dest_dir) / "skills.db"
+            shutil.copy2(fake_db, dest)
+            return {"db": dest}
+
+        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert "already exists" in result.output
+
+    def test_pull_force_overwrites(self, runner, data_dir, tmp_path, monkeypatch):
+        fake_db = _create_fake_hf_db(tmp_path)
+
+        def mock_pull(dest_dir, force=False):
+            import shutil
+            dest = Path(dest_dir) / "skills.db"
+            shutil.copy2(fake_db, dest)
+            return {"db": dest}
+
+        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull", "--force"])
+        assert result.exit_code == 0
+        assert "5" in result.output
+
+    def test_pull_auto_inits_data_dir(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull on a non-existent data dir should auto-create it."""
+        fake_db = _create_fake_hf_db(tmp_path)
+
+        def mock_pull(dest_dir, force=False):
+            import shutil
+            dest = Path(dest_dir) / "skills.db"
+            shutil.copy2(fake_db, dest)
+            return {"db": dest}
+
+        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+        assert data_dir.exists()
+
+    def test_pull_respects_global_data_dir(self, runner, data_dir, tmp_path, monkeypatch):
+        fake_db = _create_fake_hf_db(tmp_path)
+        captured_dest = []
+
+        def mock_pull(dest_dir, force=False):
+            captured_dest.append(str(dest_dir))
+            import shutil
+            dest = Path(dest_dir) / "skills.db"
+            shutil.copy2(fake_db, dest)
+            return {"db": dest}
+
+        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert str(data_dir) in captured_dest[0]
+
+
+class TestSkillSourceCompat:
+    """Ensure SKILLNET source from HF dataset is handled correctly."""
+
+    def test_skillnet_source_in_store(self):
+        store = SkillStore()
+        s = Skill(
+            name="skillnet-test",
+            description="From SkillNet",
+            instructions="SkillNet content",
+            source=SkillSource.SKILLNET,
+            category="development",
+        )
+        store.add_skill(s)
+        retrieved = store.get_skill(s.id)
+        assert retrieved.source == SkillSource.SKILLNET
+        store.close()
+
+    def test_skillnet_dedup_priority(self):
+        """SKILLNET should have lowest priority in dedup."""
+        from skill_mcp.dedup import deduplicate_skills
+
+        skills = [
+            Skill(name="s1", description="d", instructions="same content", source=SkillSource.SKILLNET),
+            Skill(name="s2", description="d", instructions="same content", source=SkillSource.LANGSKILLS),
+        ]
+        result = deduplicate_skills(skills)
+        assert len(result) == 1
+        assert result[0].source == SkillSource.LANGSKILLS  # LANGSKILLS > SKILLNET
