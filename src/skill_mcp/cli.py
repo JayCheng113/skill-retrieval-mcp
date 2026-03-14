@@ -85,11 +85,10 @@ def init(ctx, data_dir: str | None, no_register: bool):
 
     click.echo("\nInitialization complete! Next steps:")
     click.echo("  Option A (quick start with 89K pre-built skills):")
-    click.echo("    skill-mcp pull")
+    click.echo("    skill-mcp pull --include-index")
     click.echo("  Option B (import your own skills):")
     click.echo("    skill-mcp import --source directory --path <skills-dir>")
-    click.echo("  Then build the search index:")
-    click.echo("    skill-mcp build-index --backend sentence-transformers")
+    click.echo("    (index is built automatically after import)")
 
 
 def _try_register_mcp(data_path: Path) -> None:
@@ -316,9 +315,17 @@ def _pull_index(config) -> None:
 @click.option(
     "--db", type=click.Path(), default=None, help="Database path (default: ~/.skill-mcp/skills.db)"
 )
+@click.option(
+    "--no-index", is_flag=True, help="Skip automatic index update after import"
+)
 @click.pass_context
-def import_skills(ctx, source: str, source_path: str, db: str | None):
-    """Import skills from a source into the store."""
+def import_skills(ctx, source: str, source_path: str, db: str | None, no_index: bool):
+    """Import skills from a source into the store.
+
+    After importing, automatically updates the vector index so new skills
+    are immediately searchable. Use --no-index to skip this (e.g. when
+    batch-importing from multiple sources before a single build).
+    """
     from skill_mcp.store import SkillStore
 
     config = _load_config_from_ctx(ctx)
@@ -349,9 +356,75 @@ def import_skills(ctx, source: str, source_path: str, db: str | None):
         f"Imported: {stats.added} added, {stats.replaced} replaced, {stats.skipped_duplicate} duplicates"
     )
     click.echo(f"Store now has {store.count()} skills")
-    if (stats.added > 0 or stats.replaced > 0) and (config.index_dir / "index.faiss").exists():
-        click.echo("Note: run `skill-mcp build-index` to add new skills to the index.")
+
+    new_skills = stats.added > 0 or stats.replaced > 0
+    if new_skills and not no_index:
+        _auto_index(config, store)
+    elif new_skills and no_index:
+        if config.index_dir.exists() and (config.index_dir / "index.faiss").exists():
+            click.echo("Index update skipped (--no-index). Run `skill-mcp build-index` when ready.")
+
     store.close()
+
+
+def _auto_index(config, store) -> None:
+    """Automatically update the vector index after import.
+
+    Only runs if an index already exists (meaning the user has a working
+    embedding setup). If no index exists, prompts the user to build one.
+    """
+    from skill_mcp.embeddings import EmbeddingModel
+    from skill_mcp.index import SkillIndex
+
+    backend = config.embedding.backend
+    model = config.embedding.model
+    index_dir = config.index_dir
+    existing_index = index_dir / "index.faiss"
+
+    if not existing_index.exists():
+        click.echo("No index found. Run `skill-mcp build-index` to make skills searchable.")
+        return
+
+    index = SkillIndex.load(index_dir)
+    emb_info = index.embedding_info
+    if emb_info.get("backend") != backend or emb_info.get("model") != model:
+        click.echo(
+            f"Index uses {emb_info.get('backend')}/{emb_info.get('model')} "
+            f"but config expects {backend}/{model}. Skipping auto-index."
+        )
+        click.echo("Run `skill-mcp build-index --force` to rebuild with the new model.")
+        return
+
+    emb = EmbeddingModel(model_name=model, backend=backend)
+    added = index.update(store, emb)
+    if added == 0:
+        click.echo(f"Index is up to date ({len(index.skill_ids)} skills).")
+    elif added > 0:
+        index.save(index_dir)
+        click.echo(f"Index updated: {added} new skills indexed (total {len(index.skill_ids)}).")
+    else:
+        # added == -1: deletions detected, full rebuild needed
+        click.echo("Skills were removed. Rebuilding index...")
+        _full_build(config, store, backend, model)
+
+
+def _full_build(config, store, backend: str, model: str) -> None:
+    """Full index build helper for _auto_index."""
+    from skill_mcp.config import save_config
+    from skill_mcp.embeddings import EmbeddingModel
+    from skill_mcp.index import SkillIndex
+
+    emb = EmbeddingModel(model_name=model, backend=backend)
+    index = SkillIndex(emb.dimension)
+    index.embedding_info = {"backend": backend, "model": model}
+    index.build(store, emb)
+    index.save(config.index_dir)
+
+    config.embedding.backend = backend
+    config.embedding.model = model
+    save_config(config)
+
+    click.echo(f"Index built: {len(index.skill_ids)} skills.")
 
 
 @main.command("build-index")

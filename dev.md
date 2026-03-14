@@ -108,6 +108,15 @@ Higher priority replaces lower. Equal or lower is silently skipped. The `dedup` 
 
 `_add_skill_detail` does NOT commit. Public methods (`add_skill`, `add_skills`, `merge_from`) commit once after all mutations. This makes `merge_from` with 89K skills ~100x faster than per-row commits (one fsync vs 89K).
 
+### Auto-index after import
+
+`import` automatically calls `_auto_index()` after importing new skills:
+- **Index exists** → incremental update (only encode new skills)
+- **No index yet** → prompt user to run `build-index` (avoids loading heavy embedding model unexpectedly)
+- **Embedding mismatch** → skip and prompt for `build-index --force`
+
+Skip with `--no-index` for batch imports (import from multiple sources, then build once).
+
 ### Incremental indexing
 
 `SkillIndex.update()` computes `store_ids - indexed_ids`:
@@ -199,14 +208,14 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 132 tests, ~0.7s
+pytest tests/ -v    # 139 tests, ~0.7s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
 
 | Category | Tests | Coverage |
 |----------|-------|----------|
-| E2E workflow | 15 | init → import → build → search full lifecycle |
+| E2E workflow | 16 | init → import → build → search full lifecycle |
 | Cross-feature | 9 | pull+import+build, incremental, dedup+rebuild |
 | Server handlers | 11 | null store, invalid IDs, special chars, k=0 |
 | Tool descriptions | 6 | behavioral triggers, workflow references, use-case context |
@@ -217,6 +226,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | Schema/Config/FTS | 12 | partial YAML, roundtrip, special chars |
 | Importers/Dedup/Embedding | 14 | nested dirs, source compat, mock backend |
 | Data-dir/CLI | 10 | global override, envvar, nonexistent path |
+| Auto-index | 6 | incremental, no-index, mismatch, no-existing-index, multiple imports |
 | Source compat | 2 | SKILLNET store + dedup priority |
 
 ## MCP Server Instructions

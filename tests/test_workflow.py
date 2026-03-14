@@ -60,7 +60,7 @@ def populated_data_dir(data_dir, skills_dir, runner):
     assert result.exit_code == 0
     result = runner.invoke(
         main,
-        ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+        ["--data-dir", str(data_dir), "import", "--source", "directory", "--no-index", "--path", str(skills_dir)],
     )
     assert result.exit_code == 0
     result = runner.invoke(
@@ -103,6 +103,7 @@ class TestFullWorkflow:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -111,8 +112,8 @@ class TestFullWorkflow:
         assert "3 added" in result.output
         assert "Store now has 3 skills" in result.output
 
-    def test_import_warns_stale_index(self, runner, populated_data_dir, tmp_path):
-        """After import, if index exists, warn user to rebuild."""
+    def test_import_auto_indexes_when_index_exists(self, runner, populated_data_dir, tmp_path):
+        """After import, if index exists, auto-update it incrementally."""
         new_skill_dir = tmp_path / "extra"
         new_skill_dir.mkdir()
         d = new_skill_dir / "new-skill"
@@ -133,7 +134,8 @@ class TestFullWorkflow:
             ],
         )
         assert result.exit_code == 0
-        assert "build-index" in result.output.lower()
+        assert "index updated" in result.output.lower()
+        assert "1 new skills indexed" in result.output.lower()
 
     def test_build_index_mock(self, runner, data_dir, skills_dir):
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
@@ -145,6 +147,7 @@ class TestFullWorkflow:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -213,6 +216,7 @@ class TestFullWorkflow:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -231,13 +235,38 @@ class TestFullWorkflow:
         assert "Skills: 3" in result.output
         assert "Index: 3 skills" in result.output
 
-    def test_status_warns_stale_index(self, runner, populated_data_dir, tmp_path):
-        """Status should warn when index count != store count."""
+    def test_status_warns_stale_index_with_no_index(self, runner, populated_data_dir, tmp_path):
+        """Status should warn when index count != store count (--no-index skips auto-update)."""
         new_skill_dir = tmp_path / "extra2"
         d = new_skill_dir / "another"
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(
             '---\nname: "another"\ndescription: "Another skill"\n---\n\nInstructions.\n'
+        )
+        runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--no-index",
+                "--path",
+                str(new_skill_dir),
+            ],
+        )
+        result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "status"])
+        assert result.exit_code == 0
+        assert "WARNING" in result.output
+
+    def test_status_no_warning_after_auto_index(self, runner, populated_data_dir, tmp_path):
+        """Status should not warn when auto-index kept the index in sync."""
+        new_skill_dir = tmp_path / "extra3"
+        d = new_skill_dir / "synced"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "synced"\ndescription: "A synced skill"\n---\n\nInstructions.\n'
         )
         runner.invoke(
             main,
@@ -253,7 +282,7 @@ class TestFullWorkflow:
         )
         result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "status"])
         assert result.exit_code == 0
-        assert "WARNING" in result.output
+        assert "WARNING" not in result.output
 
     def test_status_no_init(self, runner, data_dir):
         result = runner.invoke(main, ["--data-dir", str(data_dir), "status"])
@@ -290,6 +319,7 @@ class TestDataDirOverride:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -345,6 +375,7 @@ class TestConfig:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -729,7 +760,7 @@ class TestIndexMetadata:
         store.close()
 
     def test_build_index_incremental_via_cli(self, runner, populated_data_dir, tmp_path):
-        """build-index after import should incrementally add new skills."""
+        """build-index after import --no-index should incrementally add new skills."""
         # populated_data_dir has 3 skills + index
         new_skill_dir = tmp_path / "extra"
         d = new_skill_dir / "new-skill"
@@ -745,6 +776,7 @@ class TestIndexMetadata:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(new_skill_dir),
             ],
@@ -1126,6 +1158,7 @@ class TestCrossFeatureLifecycle:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(custom_dir),
             ],
@@ -1179,6 +1212,7 @@ class TestCrossFeatureLifecycle:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(custom_dir),
             ],
@@ -1269,6 +1303,7 @@ class TestCrossFeatureLifecycle:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -1330,6 +1365,7 @@ class TestCrossFeatureLifecycle:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -1355,6 +1391,7 @@ class TestCrossFeatureLifecycle:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -1367,6 +1404,7 @@ class TestCrossFeatureLifecycle:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -1768,6 +1806,7 @@ class TestCLIEdgeCases:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 "/nonexistent/path",
             ],
@@ -1856,6 +1895,7 @@ class TestCLIEdgeCases:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(skills_dir),
             ],
@@ -1880,6 +1920,7 @@ class TestCLIEdgeCases:
                 "import",
                 "--source",
                 "directory",
+                "--no-index",
                 "--path",
                 str(extra_dir),
             ],
@@ -1890,6 +1931,192 @@ class TestCLIEdgeCases:
         assert "WARNING" in result.output
         assert "3" in result.output  # index has 3
         assert "4" in result.output  # store has 4
+
+
+# ---------------------------------------------------------------------------
+# Auto-index after import
+# ---------------------------------------------------------------------------
+
+
+class TestAutoIndex:
+    """Test automatic index update after import."""
+
+    def test_auto_index_no_index_exists(self, runner, data_dir, skills_dir):
+        """Import without existing index should prompt to build manually."""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "3 added" in result.output
+        assert "no index found" in result.output.lower()
+        assert "build-index" in result.output.lower()
+
+    def test_auto_index_incremental(self, runner, populated_data_dir, tmp_path):
+        """Import with existing index should auto-update incrementally."""
+        new_dir = tmp_path / "new"
+        d = new_dir / "auto-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "auto-skill"\ndescription: "Auto-indexed skill"\n---\n\nInstructions.\n'
+        )
+        result = runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(new_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "index updated" in result.output.lower()
+        assert "1 new skills indexed" in result.output
+
+        # Verify index is actually in sync
+        result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "status"])
+        assert "WARNING" not in result.output
+        assert "4 skills" in result.output  # 3 original + 1 new
+
+    def test_auto_index_no_new_skills(self, runner, populated_data_dir, skills_dir):
+        """Re-importing same skills should report index up to date."""
+        result = runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(skills_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "0 added" in result.output or "3 duplicates" in result.output
+
+    def test_no_index_flag_skips_auto_index(self, runner, populated_data_dir, tmp_path):
+        """--no-index should skip auto-indexing and leave index stale."""
+        new_dir = tmp_path / "skip"
+        d = new_dir / "skipped-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "skipped"\ndescription: "Skipped skill"\n---\n\nInstructions.\n'
+        )
+        result = runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(populated_data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--no-index",
+                "--path",
+                str(new_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "index updated" not in result.output.lower()
+        assert "skipped" in result.output.lower() or "build-index" in result.output.lower()
+
+        # Index should be stale
+        result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "status"])
+        assert "WARNING" in result.output
+
+    def test_auto_index_multiple_imports(self, runner, populated_data_dir, tmp_path):
+        """Multiple imports should each incrementally update the index."""
+        for i in range(3):
+            skill_dir = tmp_path / f"batch{i}"
+            d = skill_dir / f"skill-{i}"
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(
+                f'---\nname: "batch-{i}"\ndescription: "Batch skill {i}"\n---\n\nInstructions {i}.\n'
+            )
+            result = runner.invoke(
+                main,
+                [
+                    "--data-dir",
+                    str(populated_data_dir),
+                    "import",
+                    "--source",
+                    "directory",
+                    "--path",
+                    str(skill_dir),
+                ],
+            )
+            assert result.exit_code == 0
+            assert "1 new skills indexed" in result.output
+
+        # Final status: 3 original + 3 new = 6
+        result = runner.invoke(main, ["--data-dir", str(populated_data_dir), "status"])
+        assert "6 skills" in result.output
+        assert "WARNING" not in result.output
+
+    def test_auto_index_embedding_mismatch(self, runner, data_dir, skills_dir, tmp_path):
+        """Auto-index should skip if index embedding doesn't match config."""
+        # Init, import, build with mock
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--no-index",
+                "--path",
+                str(skills_dir),
+            ],
+        )
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+
+        # Change config backend to something different
+        from skill_mcp.config import load_config, save_config
+
+        config = load_config(data_dir / "config.yaml")
+        config.embedding.backend = "openai"
+        config.embedding.model = "text-embedding-3-large"
+        save_config(config)
+
+        # Import new skill — should detect mismatch
+        new_dir = tmp_path / "mismatch"
+        d = new_dir / "mismatch-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "mismatch"\ndescription: "Mismatch test"\n---\n\nInstructions.\n'
+        )
+        result = runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--path",
+                str(new_dir),
+            ],
+        )
+        assert result.exit_code == 0
+        assert "skipping auto-index" in result.output.lower()
+        assert "build-index --force" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

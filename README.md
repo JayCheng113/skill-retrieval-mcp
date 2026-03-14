@@ -126,8 +126,10 @@ tags: ["deployment", "production", "checklist"]
 
 ```bash
 skill-mcp import --source directory --path ~/my-skills/
-skill-mcp build-index    # incremental — only encodes new skills
+# index is updated automatically — new skills are searchable immediately
 ```
+
+No manual `build-index` needed. The import detects your existing index and incrementally adds only the new skills. Use `--no-index` to skip this (e.g. when batch-importing from multiple sources).
 
 Custom skills merge with the pre-built ones. Deduplication is automatic.
 
@@ -169,7 +171,7 @@ All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR`.
 git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
-pytest tests/ -v    # 132 tests, ~0.7s
+pytest tests/ -v    # 139 tests, ~0.7s
 ```
 
 Architecture and design decisions: [`dev.md`](dev.md)
