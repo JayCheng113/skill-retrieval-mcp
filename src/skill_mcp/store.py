@@ -78,9 +78,11 @@ class SkillStore:
 
     def add_skill(self, skill: Skill) -> bool:
         result, _ = self._add_skill_detail(skill)
+        self._conn.commit()
         return result
 
     def _add_skill_detail(self, skill: Skill) -> tuple[bool, bool]:
+        """Insert a skill, handling dedup by content_hash. Does NOT commit."""
         cur = self._conn.cursor()
         cur.execute(
             "SELECT id, source FROM skills WHERE content_hash = ?",
@@ -94,7 +96,7 @@ class SkillStore:
             old_pri = _SOURCE_PRIORITY.get(existing_source, 0)
             if new_pri <= old_pri:
                 return False, False
-            self.delete_skill(existing["id"])
+            cur.execute("DELETE FROM skills WHERE id = ?", (existing["id"],))
             replaced = True
 
         cur.execute(
@@ -116,7 +118,6 @@ class SkillStore:
                 skill.created_at.isoformat(),
             ),
         )
-        self._conn.commit()
         success = cur.rowcount > 0
         return success, replaced and success
 
@@ -131,6 +132,7 @@ class SkillStore:
                     stats.added += 1
             else:
                 stats.skipped_duplicate += 1
+        self._conn.commit()
         return stats
 
     def get_skill(self, skill_id: str) -> Skill | None:
@@ -209,7 +211,7 @@ class SkillStore:
     def merge_from(self, other_db: str | Path) -> ImportStats:
         """Merge all skills from another database, respecting source priority dedup.
 
-        Streams skills from the source DB to avoid loading everything into memory.
+        Streams skills from the source DB. Commits once at the end for performance.
         """
         source = SkillStore(other_db, readonly=True)
         stats = ImportStats(total=source.count())
@@ -223,6 +225,7 @@ class SkillStore:
                         stats.added += 1
                 else:
                     stats.skipped_duplicate += 1
+            self._conn.commit()
         finally:
             source.close()
         return stats

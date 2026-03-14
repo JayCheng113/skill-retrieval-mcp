@@ -37,7 +37,7 @@ def _load_config_from_ctx(ctx) -> "Config":
 @click.pass_context
 def init(ctx, data_dir: str | None, no_register: bool):
     """Initialize skill-retrieval-mcp data directory and config."""
-    from skill_mcp.config import Config, EmbeddingConfig, SearchConfig, ServerConfig, save_config
+    from skill_mcp.config import Config, save_config
     from skill_mcp.store import SkillStore
 
     # Global --data-dir takes precedence, then local --data-dir, then default
@@ -188,26 +188,17 @@ def pull(ctx, replace: bool, include_index: bool):
 
 
 def _rebuild_fts(db_path: Path) -> None:
-    """Rebuild FTS index after copying a database file."""
-    import sqlite3
-    conn = sqlite3.connect(str(db_path))
-    conn.executescript("""
-        CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(
-            name, description, instructions,
-            content='skills', content_rowid='rowid'
-        );
-        CREATE TRIGGER IF NOT EXISTS skills_ai AFTER INSERT ON skills BEGIN
-            INSERT INTO skills_fts(rowid, name, description, instructions)
-            VALUES (new.rowid, new.name, new.description, new.instructions);
-        END;
-        CREATE TRIGGER IF NOT EXISTS skills_ad AFTER DELETE ON skills BEGIN
-            INSERT INTO skills_fts(skills_fts, rowid, name, description, instructions)
-            VALUES ('delete', old.rowid, old.name, old.description, old.instructions);
-        END;
-        INSERT INTO skills_fts(skills_fts) VALUES('rebuild');
-    """)
-    conn.commit()
-    conn.close()
+    """Rebuild FTS index after copying a database file.
+
+    Uses SkillStore._init_db to ensure FTS schema stays in sync,
+    then triggers a full FTS rebuild.
+    """
+    from skill_mcp.store import SkillStore
+
+    store = SkillStore(db_path)  # _init_db creates FTS tables + triggers if missing
+    store._conn.execute("INSERT INTO skills_fts(skills_fts) VALUES('rebuild')")
+    store._conn.commit()
+    store.close()
 
 
 def _pull_index(config) -> None:

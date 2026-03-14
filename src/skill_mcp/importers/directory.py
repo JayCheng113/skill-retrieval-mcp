@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from skill_mcp.importers.frontmatter import split_frontmatter
 from skill_mcp.schema import Skill, SkillSource
 from skill_mcp.store import ImportStats, SkillStore
 
@@ -23,7 +24,7 @@ class DirectoryImporter:
 
     def _parse_skill_file(self, path: Path) -> Skill | None:
         text = path.read_text(encoding="utf-8")
-        frontmatter, body = self._split_frontmatter(text)
+        frontmatter, body = split_frontmatter(text)
         if frontmatter is None:
             return None
 
@@ -43,15 +44,3 @@ class DirectoryImporter:
             source=SkillSource.COMMUNITY,
             category=category,
         )
-
-    @staticmethod
-    def _split_frontmatter(text: str) -> tuple[str | None, str]:
-        stripped = text.strip()
-        if not stripped.startswith("---"):
-            return None, text
-        end_idx = stripped.find("---", 3)
-        if end_idx == -1:
-            return None, text
-        frontmatter = stripped[3:end_idx].strip()
-        body = stripped[end_idx + 3:]
-        return frontmatter, body

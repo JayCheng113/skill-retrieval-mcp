@@ -104,7 +104,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 
 def _handle_search_skills(arguments: dict) -> list[TextContent]:
-    if _index is None or _embedding is None:
+    if _store is None or _index is None or _embedding is None:
         return [TextContent(
             type="text",
             text=json.dumps({
@@ -131,6 +131,11 @@ def _handle_search_skills(arguments: dict) -> list[TextContent]:
 
 
 def _handle_get_skill(arguments: dict) -> list[TextContent]:
+    if _store is None:
+        return [TextContent(
+            type="text",
+            text=json.dumps({"error": "Skill store not available. Run `skill-mcp init` first."}),
+        )]
     skill_id = arguments["skill_id"]
     skill = _store.get_skill(skill_id)
     if skill is None:
@@ -152,6 +157,11 @@ def _handle_get_skill(arguments: dict) -> list[TextContent]:
 
 
 def _handle_keyword_search(arguments: dict) -> list[TextContent]:
+    if _store is None:
+        return [TextContent(
+            type="text",
+            text=json.dumps({"error": "Skill store not available. Run `skill-mcp init` first."}),
+        )]
     query = arguments["query"]
     limit = arguments.get("limit", 10)
 
@@ -170,6 +180,11 @@ def _handle_keyword_search(arguments: dict) -> list[TextContent]:
 
 
 def _handle_list_categories() -> list[TextContent]:
+    if _store is None:
+        return [TextContent(
+            type="text",
+            text=json.dumps({"error": "Skill store not available. Run `skill-mcp init` first."}),
+        )]
     counts = _store.category_counts()
     return [TextContent(type="text", text=json.dumps(counts, ensure_ascii=False))]
 

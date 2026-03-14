@@ -906,3 +906,797 @@ class TestSkillSourceCompat:
         result = deduplicate_skills(skills)
         assert len(result) == 1
         assert result[0].source == SkillSource.LANGSKILLS  # LANGSKILLS > SKILLNET
+
+
+# ---------------------------------------------------------------------------
+# Cross-feature lifecycle tests
+# ---------------------------------------------------------------------------
+
+
+class TestCrossFeatureLifecycle:
+    """Tests that simulate real user workflows spanning multiple commands."""
+
+    def test_pull_import_build_search(self, runner, data_dir, tmp_path, monkeypatch):
+        """Full lifecycle: pull HF data → import custom → build-index → search."""
+        # 1. Pull HF skills
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+
+        # 2. Import custom skills
+        custom_dir = tmp_path / "custom"
+        d = custom_dir / "my-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "my-custom-skill"\ndescription: "Custom debugging skill"\n'
+            'tags: ["custom"]\n---\n\n## Instructions\n\nCustom skill instructions.\n'
+        )
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(custom_dir)],
+        )
+        assert result.exit_code == 0
+        assert "1 added" in result.output
+
+        # 3. Build index (should cover all 6 skills)
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "6 skills" in result.output
+
+        # 4. Search should work
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "search", "custom debugging", "--k", "3"],
+        )
+        assert result.exit_code == 0
+        # Should return scored results
+        assert "[" in result.output
+
+    def test_pull_build_import_incremental(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull → build-index → import more → incremental build."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+
+        # Build index on 5 HF skills
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "5 skills" in result.output
+
+        # Import one more custom skill
+        custom_dir = tmp_path / "extra"
+        d = custom_dir / "extra-skill"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "extra"\ndescription: "Extra skill"\n---\n\nExtra instructions.\n'
+        )
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(custom_dir)],
+        )
+
+        # Incremental build should add only 1
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "Incremental" in result.output
+        assert "added 1" in result.output
+
+    def test_import_build_delete_rebuild(self, runner, data_dir, tmp_path):
+        """Import → build-index → delete skill → build-index detects deletion and rebuilds."""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+
+        # Add 3 distinct skills
+        store = SkillStore(data_dir / "skills.db")
+        s1 = Skill(name="s1", description="d", instructions="content alpha",
+                    source=SkillSource.COMMUNITY)
+        s2 = Skill(name="s2", description="d", instructions="content beta",
+                    source=SkillSource.COMMUNITY)
+        s3 = Skill(name="s3", description="d", instructions="content gamma",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+        store.add_skill(s2)
+        store.add_skill(s3)
+        store.close()
+
+        # Build index on 3 skills
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "3 skills" in result.output
+
+        # Delete one skill (simulates what dedup does)
+        store = SkillStore(data_dir / "skills.db")
+        store.delete_skill(s1.id)
+        store.close()
+
+        # build-index should detect deletion and rebuild
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "Rebuilding" in result.output or "Index built" in result.output
+
+    def test_pull_replace_clears_index_then_rebuild(self, runner, data_dir, tmp_path, monkeypatch):
+        """pull --replace → verify index cleared → build-index starts fresh."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert (data_dir / "index" / "index.faiss").exists()
+
+        # Pull --replace should clear index
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull", "--replace"])
+        assert result.exit_code == 0
+        assert not (data_dir / "index" / "index.faiss").exists()
+
+        # build-index should do full build, not incremental
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+        assert result.exit_code == 0
+        assert "Index built" in result.output
+
+    def test_build_index_force_changes_model(self, runner, data_dir, skills_dir):
+        """build-index with model A → --force with model B → search uses new model."""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+        )
+
+        # Build with model A
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock", "--model", "model-a"],
+        )
+
+        # Force rebuild with model B
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock", "--model", "model-b", "--force"],
+        )
+        assert result.exit_code == 0
+        assert "Index built" in result.output
+
+        # Verify config updated to model B
+        config = load_config(data_dir / "config.yaml")
+        assert config.embedding.model == "model-b"
+
+        # Verify index metadata has model B
+        meta_path = data_dir / "index" / "skill_ids.json"
+        with open(meta_path) as f:
+            meta = json.load(f)
+        assert meta["embedding"]["model"] == "model-b"
+
+    def test_search_k_greater_than_total(self, runner, populated_data_dir):
+        """Search with k > total skills should return all skills without error."""
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(populated_data_dir), "search", "test", "--k", "100"],
+        )
+        assert result.exit_code == 0
+        # Should return 3 results (all skills in populated_data_dir)
+
+    def test_status_after_full_lifecycle(self, runner, data_dir, skills_dir, tmp_path, monkeypatch):
+        """Status should reflect correct counts after pull + import + build."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+        )
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "status"])
+        assert result.exit_code == 0
+        assert "Skills: 8" in result.output  # 5 HF + 3 custom
+        assert "Index: 8 skills" in result.output
+
+    def test_double_import_same_skills(self, runner, data_dir, skills_dir):
+        """Importing same directory twice should not create duplicates."""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+        )
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+        )
+        assert result.exit_code == 0
+        assert "3 duplicates" in result.output
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == 3
+        store.close()
+
+    def test_pull_then_pull_merge_is_idempotent(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pulling twice with merge should not change skill count."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        count_after_first = store.count()
+        store.close()
+
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == count_after_first
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# Server handler edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestServerHandlerEdgeCases:
+    """Server handler edge cases that could crash in production."""
+
+    def test_get_skill_nonexistent_id(self):
+        """get_skill with invalid ID should return error, not crash."""
+        import skill_mcp.server as srv
+        store = SkillStore()
+        srv._store = store
+        result = srv._handle_get_skill({"skill_id": "nonexistent-id"})
+        data = json.loads(result[0].text)
+        assert "error" in data
+        store.close()
+
+    def test_get_skill_store_is_none(self):
+        """get_skill when store is None should not crash."""
+        import skill_mcp.server as srv
+        srv._store = None
+        srv._index = None
+        srv._embedding = None
+        try:
+            result = srv._handle_get_skill({"skill_id": "any-id"})
+            # If it handles gracefully, check for error message
+            data = json.loads(result[0].text)
+            assert "error" in data
+        except AttributeError:
+            pytest.fail("_handle_get_skill crashes when _store is None — needs null check")
+
+    def test_keyword_search_store_is_none(self):
+        """keyword_search when store is None should not crash."""
+        import skill_mcp.server as srv
+        srv._store = None
+        try:
+            result = srv._handle_keyword_search({"query": "test"})
+            data = json.loads(result[0].text)
+            assert "error" in data
+        except AttributeError:
+            pytest.fail("_handle_keyword_search crashes when _store is None — needs null check")
+
+    def test_list_categories_store_is_none(self):
+        """list_categories when store is None should not crash."""
+        import skill_mcp.server as srv
+        srv._store = None
+        try:
+            result = srv._handle_list_categories()
+            data = json.loads(result[0].text)
+            # Either returns error or empty list
+        except AttributeError:
+            pytest.fail("_handle_list_categories crashes when _store is None — needs null check")
+
+    def test_list_categories_empty_store(self):
+        """list_categories with empty store should return empty list."""
+        import skill_mcp.server as srv
+        store = SkillStore()
+        srv._store = store
+        result = srv._handle_list_categories()
+        data = json.loads(result[0].text)
+        assert data == []
+        store.close()
+
+    def test_search_k_zero(self):
+        """search_skills with k=0 should return empty results."""
+        import skill_mcp.server as srv
+        store = SkillStore()
+        store.add_skill(Skill(
+            name="test", description="test", instructions="test content",
+            source=SkillSource.COMMUNITY,
+        ))
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+        srv._store = store
+        srv._index = index
+        srv._embedding = emb
+        result = srv._handle_search_skills({"query": "test", "k": 0})
+        data = json.loads(result[0].text)
+        assert isinstance(data, list)
+        assert len(data) == 0
+        store.close()
+
+    def test_keyword_search_special_characters(self):
+        """keyword_search with FTS5 special chars should not crash."""
+        import skill_mcp.server as srv
+        store = SkillStore()
+        store.add_skill(Skill(
+            name="c++ debugging", description="Debug C++ apps",
+            instructions="Use gdb for debugging", source=SkillSource.COMMUNITY,
+        ))
+        srv._store = store
+        # These contain FTS5 operators that could cause syntax errors
+        for query in ["c++", "NOT AND OR", '"unclosed quote', "test*", "()"]:
+            result = srv._handle_keyword_search({"query": query})
+            data = json.loads(result[0].text)
+            assert isinstance(data, list)  # should not crash
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# Store additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestStoreAdditionalEdgeCases:
+    def test_merge_from_empty_source(self, tmp_path):
+        """merge_from with empty source DB should be a no-op."""
+        empty_path = tmp_path / "empty.db"
+        SkillStore(empty_path).close()
+
+        target = SkillStore(tmp_path / "target.db")
+        target.add_skill(Skill(
+            name="existing", description="d", instructions="c",
+            source=SkillSource.COMMUNITY,
+        ))
+        stats = target.merge_from(empty_path)
+        assert stats.total == 0
+        assert stats.added == 0
+        assert target.count() == 1
+        target.close()
+
+    def test_merge_from_higher_priority_replaces(self, tmp_path):
+        """merge_from should replace when source has higher priority."""
+        # Source has ANTHROPIC (priority 4)
+        source_path = tmp_path / "source.db"
+        source = SkillStore(source_path)
+        source.add_skill(Skill(
+            name="upgraded", description="d", instructions="same content for both",
+            source=SkillSource.ANTHROPIC,
+        ))
+        source.close()
+
+        # Target has LANGSKILLS (priority 2)
+        target_path = tmp_path / "target.db"
+        target = SkillStore(target_path)
+        target.add_skill(Skill(
+            name="original", description="d", instructions="same content for both",
+            source=SkillSource.LANGSKILLS,
+        ))
+        stats = target.merge_from(source_path)
+        assert stats.replaced == 1
+        assert target.count() == 1  # replaced, not added
+        # The remaining skill should be ANTHROPIC source
+        skill = list(target.iter_all())[0]
+        assert skill.source == SkillSource.ANTHROPIC
+        target.close()
+
+    def test_keyword_search_empty_store(self):
+        """keyword_search on empty store should return empty list."""
+        store = SkillStore()
+        results = store.search_keyword("anything")
+        assert results == []
+        store.close()
+
+    def test_add_skill_same_id_ignored(self):
+        """Adding skill with same ID (INSERT OR IGNORE) should not duplicate."""
+        store = SkillStore()
+        s1 = Skill(name="test", description="d", instructions="content",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+        # Same skill again should be ignored
+        result = store.add_skill(s1)
+        assert not result  # should return False (duplicate)
+        assert store.count() == 1
+        store.close()
+
+    def test_categories_empty_store(self):
+        """categories() and category_counts() on empty store."""
+        store = SkillStore()
+        assert store.categories() == []
+        assert store.category_counts() == []
+        store.close()
+
+    def test_skill_with_empty_instructions(self):
+        """Skill with empty instructions should still work."""
+        store = SkillStore()
+        s = Skill(name="empty", description="d", instructions="",
+                  source=SkillSource.COMMUNITY)
+        store.add_skill(s)
+        retrieved = store.get_skill(s.id)
+        assert retrieved is not None
+        assert retrieved.instructions == ""
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# Index edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestIndexEdgeCases:
+    def test_search_empty_index(self):
+        """Search on empty index should return empty list."""
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        qv = emb.encode_single("test query")
+        results = index.search(qv, k=5)
+        assert results == []
+
+    def test_search_k_larger_than_ntotal(self):
+        """Search with k > ntotal should return all available results."""
+        store = SkillStore()
+        store.add_skill(Skill(name="s1", description="d", instructions="c1",
+                              source=SkillSource.COMMUNITY))
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+
+        qv = emb.encode_single("test")
+        results = index.search(qv, k=100)
+        assert len(results) == 1  # only 1 skill in index
+        store.close()
+
+    def test_build_empty_store(self):
+        """build() with empty store should create valid but empty index."""
+        store = SkillStore()
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+        assert index.index.ntotal == 0
+        assert index.skill_ids == []
+        store.close()
+
+    def test_save_load_roundtrip(self, tmp_path):
+        """Save → load should preserve all state."""
+        store = SkillStore()
+        s1 = Skill(name="s1", description="d1", instructions="c1",
+                    source=SkillSource.COMMUNITY)
+        s2 = Skill(name="s2", description="d2", instructions="c2",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+        store.add_skill(s2)
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.embedding_info = {"backend": "mock", "model": "test"}
+        index.build(store, emb)
+
+        idx_dir = tmp_path / "idx"
+        index.save(idx_dir)
+        loaded = SkillIndex.load(idx_dir)
+
+        assert loaded.index.ntotal == 2
+        assert set(loaded.skill_ids) == {s1.id, s2.id}
+        assert loaded.embedding_info == {"backend": "mock", "model": "test"}
+        assert loaded._dimension == 128
+
+        # Search should work on loaded index
+        qv = emb.encode_single("test")
+        results = loaded.search(qv, k=5)
+        assert len(results) == 2
+        store.close()
+
+    def test_update_then_search_finds_new_skill(self):
+        """After incremental update, search should find the new skill."""
+        store = SkillStore()
+        s1 = Skill(name="python-debug", description="Debug Python apps",
+                    instructions="Use pdb for Python debugging",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+
+        s2 = Skill(name="rust-debug", description="Debug Rust apps",
+                    instructions="Use rust-gdb for Rust debugging",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s2)
+        index.update(store, emb)
+
+        qv = emb.encode_single("Rust debugging")
+        results = index.search(qv, k=2)
+        assert len(results) == 2
+        result_ids = {r[0] for r in results}
+        assert s2.id in result_ids
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# Retriever edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRetriever:
+    def test_retrieve_stale_index_skill_deleted(self):
+        """If a skill was deleted from store but still in index, retriever should skip it."""
+        from skill_mcp.retriever import retrieve
+
+        store = SkillStore()
+        s1 = Skill(name="s1", description="d", instructions="c1",
+                    source=SkillSource.COMMUNITY)
+        s2 = Skill(name="s2", description="d", instructions="c2",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+        store.add_skill(s2)
+
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+
+        # Delete s1 from store (but not from index)
+        store.delete_skill(s1.id)
+
+        results = retrieve("test query", store, index, emb, k=5)
+        # s1 should be silently skipped
+        result_ids = {r.skill.id for r in results}
+        assert s1.id not in result_ids
+        assert s2.id in result_ids
+        store.close()
+
+    def test_retrieve_returns_metadata(self):
+        """retrieve should include retrieval metadata."""
+        from skill_mcp.retriever import retrieve
+
+        store = SkillStore()
+        store.add_skill(Skill(name="s1", description="d", instructions="c1",
+                              source=SkillSource.COMMUNITY))
+        emb = EmbeddingModel(backend="mock")
+        index = SkillIndex(emb.dimension)
+        index.build(store, emb)
+
+        results = retrieve("test", store, index, emb)
+        assert len(results) >= 1
+        assert results[0].retrieval_metadata["method"] == "vector"
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# CLI edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestCLIEdgeCases:
+    def test_import_nonexistent_path(self, runner, data_dir):
+        """Import from nonexistent path should fail gracefully."""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory",
+             "--path", "/nonexistent/path"],
+        )
+        assert result.exit_code != 0
+
+    def test_search_empty_store_with_index(self, runner, data_dir):
+        """Edge: what if someone manually deleted all skills but index remains?"""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        result = runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "search", "test"],
+        )
+        assert result.exit_code == 0
+        # Should show "no index" message since we never built one
+
+    def test_dedup_removes_via_cli(self, runner, data_dir):
+        """dedup command removes duplicates inserted via raw SQL (bypassing store dedup)."""
+        import sqlite3
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+
+        # Insert duplicates via raw SQL to bypass _add_skill_detail dedup
+        store = SkillStore(data_dir / "skills.db")
+        s1 = Skill(name="s1", description="d", instructions="shared content",
+                    source=SkillSource.LANGSKILLS)
+        s2 = Skill(name="s2", description="d", instructions="shared content",
+                    source=SkillSource.ANTHROPIC)
+        s3 = Skill(name="s3", description="d", instructions="unique content",
+                    source=SkillSource.COMMUNITY)
+        # Add s2 first (higher priority), then force s1 in via raw SQL
+        store.add_skill(s2)
+        store.add_skill(s3)
+        conn = sqlite3.connect(str(data_dir / "skills.db"))
+        conn.execute(
+            "INSERT INTO skills (id, name, description, instructions, source, source_id, category, tags, metadata, content_hash, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (s1.id, s1.name, s1.description, s1.instructions, s1.source.value,
+             s1.source_id, s1.category, "[]", "{}", s1.content_hash, s1.created_at.isoformat()),
+        )
+        conn.commit()
+        conn.close()
+        store.close()
+
+        # Now store has 3 skills, 2 with same content_hash
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == 3
+        store.close()
+
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "dedup"])
+        assert result.exit_code == 0
+        assert "Removed 1" in result.output
+
+    def test_pull_replace_no_existing_db(self, runner, data_dir, tmp_path, monkeypatch):
+        """pull --replace when no DB exists yet should work fine."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull", "--replace"])
+        assert result.exit_code == 0
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == 5
+        store.close()
+
+    def test_status_index_stale_after_import(self, runner, data_dir, skills_dir, tmp_path):
+        """Status should show WARNING when index count != store count."""
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(skills_dir)],
+        )
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "build-index", "--backend", "mock"],
+        )
+
+        # Add one more skill
+        extra_dir = tmp_path / "extra"
+        d = extra_dir / "new"
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(
+            '---\nname: "new"\ndescription: "New"\n---\n\nNew instructions.\n'
+        )
+        runner.invoke(
+            main,
+            ["--data-dir", str(data_dir), "import", "--source", "directory", "--path", str(extra_dir)],
+        )
+
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "status"])
+        assert result.exit_code == 0
+        assert "WARNING" in result.output
+        assert "3" in result.output  # index has 3
+        assert "4" in result.output  # store has 4
+
+
+# ---------------------------------------------------------------------------
+# Schema edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaEdgeCases:
+    def test_from_dict_missing_optional_fields(self):
+        """from_dict with only required fields should fill defaults."""
+        data = {
+            "name": "test",
+            "description": "d",
+            "instructions": "content",
+            "source": "community",
+        }
+        skill = Skill.from_dict(data)
+        assert skill.name == "test"
+        assert skill.tags == []
+        assert skill.category == ""
+        assert skill.source_id == ""
+
+    def test_same_content_different_source_same_hash(self):
+        """Same instructions from different sources should have same content_hash."""
+        s1 = Skill(name="a", description="d", instructions="identical",
+                    source=SkillSource.LANGSKILLS)
+        s2 = Skill(name="b", description="d", instructions="identical",
+                    source=SkillSource.ANTHROPIC)
+        assert s1.content_hash == s2.content_hash
+        # But different IDs since source differs
+        assert s1.id != s2.id
+
+    def test_embedding_text_with_empty_instructions(self):
+        """to_embedding_text should work with empty instructions."""
+        s = Skill(name="test", description="desc", instructions="",
+                  source=SkillSource.COMMUNITY)
+        text = s.to_embedding_text()
+        assert "test" in text
+        assert "desc" in text
+
+
+# ---------------------------------------------------------------------------
+# Config edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestConfigEdgeCases:
+    def test_partial_yaml(self, tmp_path):
+        """Config YAML with only some fields should fill defaults for the rest."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("data_dir: /custom/path\n")
+        config = load_config(config_path)
+        assert config.data_dir == "/custom/path"
+        assert config.embedding.backend == "sentence-transformers"
+        assert config.embedding.model == "all-MiniLM-L6-v2"
+
+    def test_empty_yaml(self, tmp_path):
+        """Empty YAML file should return defaults."""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("")
+        config = load_config(config_path)
+        assert config.data_dir == "~/.skill-mcp"
+
+    def test_config_preserves_custom_embedding(self, tmp_path):
+        """Config round-trip should preserve custom embedding settings."""
+        from skill_mcp.config import save_config
+        config = Config(data_dir=str(tmp_path))
+        config.embedding.backend = "openai"
+        config.embedding.model = "text-embedding-3-large"
+        save_config(config)
+
+        loaded = load_config(config.config_path)
+        assert loaded.embedding.backend == "openai"
+        assert loaded.embedding.model == "text-embedding-3-large"
+
+
+# ---------------------------------------------------------------------------
+# FTS edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestFTSEdgeCases:
+    def test_fts_search_after_pull_copy(self, runner, data_dir, tmp_path, monkeypatch):
+        """After pull (copy path), FTS should work for keyword_search."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+
+        # keyword search should work
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        results = store.search_keyword("HF skill")
+        assert len(results) > 0
+        store.close()
+
+    def test_fts_search_after_delete(self):
+        """FTS should stay in sync after deleting a skill."""
+        store = SkillStore()
+        s1 = Skill(name="unique-findable", description="d",
+                    instructions="special searchable content xyz123",
+                    source=SkillSource.COMMUNITY)
+        store.add_skill(s1)
+
+        results = store.search_keyword("xyz123")
+        assert len(results) == 1
+
+        store.delete_skill(s1.id)
+        results = store.search_keyword("xyz123")
+        assert len(results) == 0
+        store.close()
+
+    def test_fts_with_special_characters(self):
+        """FTS should handle special characters in queries."""
+        store = SkillStore()
+        store.add_skill(Skill(
+            name="c-sharp-testing", description="Test C# apps",
+            instructions="Use NUnit for C# testing",
+            source=SkillSource.COMMUNITY,
+        ))
+        # These should not crash
+        for q in ["C#", "c++", "node.js", "test*", "(debug)"]:
+            results = store.search_keyword(q)
+            assert isinstance(results, list)
+        store.close()
