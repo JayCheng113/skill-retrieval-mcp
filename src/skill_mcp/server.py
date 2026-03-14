@@ -25,8 +25,10 @@ server = Server(
         "A knowledge base of 89K+ skills is available — covering tools, frameworks, "
         "languages, DevOps, cloud, ML, and more. Each skill contains a structured "
         "how-to guide with best practices and step-by-step instructions. "
-        "Use search_skills (semantic) or keyword_search (exact terms) to find relevant "
-        "skills, then get_skill to fetch full instructions."
+        "Workflow: search_skills (semantic) or keyword_search (exact terms) → "
+        "review summaries → get_skill to fetch full step-by-step instructions. "
+        "Search proactively when encountering unfamiliar technologies, "
+        "before writing infrastructure or config files, or when best practices matter."
     ),
 )
 
@@ -42,10 +44,13 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="search_skills",
             description=(
-                "Search a knowledge base of 89K+ skills (how-to guides, best practices, technical workflows) "
-                "by semantic similarity. Use this BEFORE starting any task — when the user asks how to do something, "
-                "needs guidance on tools/frameworks/languages, or when you are unsure about the best approach. "
-                "Returns summaries only; call get_skill for full instructions."
+                "Search 89K+ technical skills by semantic similarity. "
+                "Use this when you're about to write configuration files "
+                "(Dockerfile, CI/CD yaml, k8s manifests, Terraform, nginx, etc.), "
+                "set up a new tool or framework, implement a design pattern, "
+                "debug an unfamiliar error, or need best practices for a specific technology. "
+                "Also use when the user asks 'how to', 'best way to', or 'help me with'. "
+                "Returns summaries only — call get_skill for full instructions."
             ),
             inputSchema={
                 "type": "object",
@@ -66,9 +71,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="get_skill",
             description=(
-                "Fetch the full instructions for a skill by ID. "
-                "Call this after search_skills or keyword_search to retrieve the detailed guide "
-                "for a skill you want to apply."
+                "Fetch full step-by-step instructions for a skill by ID. "
+                "Always call this after search_skills or keyword_search "
+                "when you find a relevant skill — the search results contain "
+                "summaries only, this returns the complete guide with code examples "
+                "and best practices."
             ),
             inputSchema={
                 "type": "object",
@@ -84,9 +91,11 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="keyword_search",
             description=(
-                "Search skills by keyword matching. Use when you have specific terms "
-                "(tool names, error messages, technology names) rather than a general description. "
-                "Works without a vector index. Returns summaries; call get_skill for full instructions."
+                "Search skills by exact keyword matching. "
+                "Prefer this over search_skills when you have specific terms — "
+                "tool names (pytest, webpack, terraform), error messages, CLI commands, "
+                "or technology names. Works without a vector index. "
+                "Returns summaries — call get_skill for full instructions."
             ),
             inputSchema={
                 "type": "object",
@@ -107,9 +116,10 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="list_categories",
             description=(
-                "List all skill categories and their counts. "
-                "Use to discover what domains are covered (e.g., cloud, ml, devtools, linux) "
-                "or to help the user browse available skills."
+                "List all skill categories with counts. "
+                "Use to discover what domains are covered or when the user asks "
+                "'what skills do you have', 'what can you help with', "
+                "or wants to browse available knowledge areas."
             ),
             inputSchema={
                 "type": "object",
