@@ -1,23 +1,18 @@
-"""Download pre-built skill datasets from HuggingFace Hub."""
+"""Download pre-built skill datasets from HuggingFace Hub.
+
+Each function downloads a single artifact and returns the cached path.
+The CLI layer decides how to use these files (copy, merge, etc.).
+"""
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 HF_REPO = "zcheng256/skillretrieval-data"
 
-# Files available on HuggingFace and their relative paths in the repo
-HF_FILES = {
-    "db": "processed/skills.db",
-}
 
-
-def pull_dataset(dest_dir: Path, force: bool = False) -> dict[str, Path]:
-    """Download the pre-built skills.db from HuggingFace Hub.
-
-    Returns a dict mapping file type to local path.
-    """
+def _hf_download(filename: str) -> Path:
+    """Download a single file from HuggingFace Hub. Returns cached path."""
     try:
         from huggingface_hub import hf_hub_download
     except ImportError:
@@ -25,22 +20,21 @@ def pull_dataset(dest_dir: Path, force: bool = False) -> dict[str, Path]:
             "HuggingFace Hub is required for pull. Install with:\n"
             "  pip install skill-retrieval-mcp[hf]"
         )
-
-    dest_dir = Path(dest_dir).expanduser()
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    db_dest = dest_dir / "skills.db"
-    if db_dest.exists() and not force:
-        raise FileExistsError(
-            f"Database already exists at {db_dest}. Use --force to overwrite."
-        )
-
-    downloaded = hf_hub_download(
+    return Path(hf_hub_download(
         repo_id=HF_REPO,
-        filename=HF_FILES["db"],
+        filename=filename,
         repo_type="dataset",
-    )
-    # hf_hub_download returns a cache path; copy to destination
-    shutil.copy2(downloaded, db_dest)
+    ))
 
-    return {"db": db_dest}
+
+def download_skills_db() -> Path:
+    """Download pre-built skills.db. Returns path to HF-cached file."""
+    return _hf_download("processed/skills.db")
+
+
+def download_index() -> dict[str, Path]:
+    """Download pre-built FAISS index. Returns paths to cached files."""
+    return {
+        "faiss": _hf_download("indices/index.faiss"),
+        "meta": _hf_download("indices/skill_ids.json"),
+    }

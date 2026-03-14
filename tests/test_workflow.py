@@ -460,6 +460,51 @@ class TestStoreEdgeCases:
             )
             assert store.count() == 1
 
+    def test_merge_from(self, tmp_path):
+        """merge_from should add skills from another DB, respecting dedup."""
+        # Create source DB
+        source_path = tmp_path / "source.db"
+        source = SkillStore(source_path)
+        for i in range(3):
+            source.add_skill(Skill(
+                name=f"src-{i}", description="d", instructions=f"src content {i}",
+                source=SkillSource.LANGSKILLS,
+            ))
+        source.close()
+
+        # Create target DB with one overlapping skill
+        target_path = tmp_path / "target.db"
+        target = SkillStore(target_path)
+        target.add_skill(Skill(
+            name="existing", description="d", instructions="unique content",
+            source=SkillSource.COMMUNITY,
+        ))
+        stats = target.merge_from(source_path)
+        assert stats.added == 3
+        assert target.count() == 4  # 1 existing + 3 merged
+        target.close()
+
+    def test_merge_from_dedup(self, tmp_path):
+        """merge_from should skip duplicates based on content_hash."""
+        source_path = tmp_path / "source.db"
+        source = SkillStore(source_path)
+        source.add_skill(Skill(
+            name="shared", description="d", instructions="same content",
+            source=SkillSource.LANGSKILLS,
+        ))
+        source.close()
+
+        target_path = tmp_path / "target.db"
+        target = SkillStore(target_path)
+        target.add_skill(Skill(
+            name="shared", description="d", instructions="same content",
+            source=SkillSource.COMMUNITY,  # higher priority
+        ))
+        stats = target.merge_from(source_path)
+        assert stats.skipped_duplicate == 1
+        assert target.count() == 1  # no duplicates
+        target.close()
+
 
 # ---------------------------------------------------------------------------
 # Index metadata roundtrip
@@ -642,88 +687,86 @@ def _create_fake_hf_db(path: Path) -> Path:
 
 
 class TestPull:
-    def test_pull_downloads_and_reports(self, runner, data_dir, tmp_path, monkeypatch):
-        """Pull should download DB and report skill count."""
+    def _mock_download(self, fake_db, monkeypatch):
+        """Patch download_skills_db to return a fake cached DB path."""
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+
+    def test_pull_fresh_store(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull into empty store should copy directly and report count."""
         fake_db = _create_fake_hf_db(tmp_path)
-
-        def mock_pull(dest_dir, force=False):
-            import shutil
-            dest = Path(dest_dir) / "skills.db"
-            shutil.copy2(fake_db, dest)
-            return {"db": dest}
-
-        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
-        # init first
+        self._mock_download(fake_db, monkeypatch)
         runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
-        assert result.exit_code == 0
-        assert "5" in result.output  # 5 skills
-        assert "Next step" in result.output
-
-    def test_pull_refuses_overwrite_without_force(self, runner, data_dir, tmp_path, monkeypatch):
-        fake_db = _create_fake_hf_db(tmp_path)
-
-        call_count = 0
-
-        def mock_pull(dest_dir, force=False):
-            nonlocal call_count
-            call_count += 1
-            if not force:
-                raise FileExistsError("Database already exists. Use --force.")
-            import shutil
-            dest = Path(dest_dir) / "skills.db"
-            shutil.copy2(fake_db, dest)
-            return {"db": dest}
-
-        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
-        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
-        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
-        assert "already exists" in result.output
-
-    def test_pull_force_overwrites(self, runner, data_dir, tmp_path, monkeypatch):
-        fake_db = _create_fake_hf_db(tmp_path)
-
-        def mock_pull(dest_dir, force=False):
-            import shutil
-            dest = Path(dest_dir) / "skills.db"
-            shutil.copy2(fake_db, dest)
-            return {"db": dest}
-
-        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
-        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
-        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull", "--force"])
         assert result.exit_code == 0
         assert "5" in result.output
+        assert "Next step" in result.output
+
+    def test_pull_merges_by_default(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull into existing store should merge, not overwrite."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        self._mock_download(fake_db, monkeypatch)
+        # Init and add a custom skill
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        store = SkillStore(data_dir / "skills.db")
+        store.add_skill(Skill(
+            name="my-custom",
+            description="My skill",
+            instructions="Custom instructions unique content",
+            source=SkillSource.COMMUNITY,
+        ))
+        store.close()
+
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+        assert "Merged" in result.output
+
+        # Custom skill should still be there
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == 6  # 1 custom + 5 from HF
+        store.close()
+
+    def test_pull_replace_overwrites(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull --replace should discard existing skills."""
+        fake_db = _create_fake_hf_db(tmp_path)
+        self._mock_download(fake_db, monkeypatch)
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
+        # Add a custom skill
+        store = SkillStore(data_dir / "skills.db")
+        store.add_skill(Skill(
+            name="my-custom",
+            description="My skill",
+            instructions="Custom instructions unique",
+            source=SkillSource.COMMUNITY,
+        ))
+        store.close()
+
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull", "--replace"])
+        assert result.exit_code == 0
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == 5  # only HF skills
+        store.close()
 
     def test_pull_auto_inits_data_dir(self, runner, data_dir, tmp_path, monkeypatch):
         """Pull on a non-existent data dir should auto-create it."""
         fake_db = _create_fake_hf_db(tmp_path)
-
-        def mock_pull(dest_dir, force=False):
-            import shutil
-            dest = Path(dest_dir) / "skills.db"
-            shutil.copy2(fake_db, dest)
-            return {"db": dest}
-
-        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        self._mock_download(fake_db, monkeypatch)
         result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
         assert result.exit_code == 0
         assert data_dir.exists()
+        assert (data_dir / "skills.db").exists()
 
-    def test_pull_respects_global_data_dir(self, runner, data_dir, tmp_path, monkeypatch):
+    def test_pull_merge_dedup(self, runner, data_dir, tmp_path, monkeypatch):
+        """Pull should not create duplicates when run twice."""
         fake_db = _create_fake_hf_db(tmp_path)
-        captured_dest = []
-
-        def mock_pull(dest_dir, force=False):
-            captured_dest.append(str(dest_dir))
-            import shutil
-            dest = Path(dest_dir) / "skills.db"
-            shutil.copy2(fake_db, dest)
-            return {"db": dest}
-
-        monkeypatch.setattr("skill_mcp.hub.pull_dataset", mock_pull)
+        self._mock_download(fake_db, monkeypatch)
+        runner.invoke(main, ["--data-dir", str(data_dir), "init", "--no-register"])
         runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
-        assert str(data_dir) in captured_dest[0]
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        assert result.exit_code == 0
+        assert "0 new" in result.output or "unchanged" in result.output
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        assert store.count() == 5
+        store.close()
 
 
 class TestSkillSourceCompat:

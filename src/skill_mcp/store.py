@@ -200,6 +200,27 @@ class SkillStore:
         )
         return [{"category": row[0], "count": row[1]} for row in cur.fetchall()]
 
+    def merge_from(self, other_db: str | Path) -> ImportStats:
+        """Merge all skills from another database, respecting source priority dedup.
+
+        Streams skills from the source DB to avoid loading everything into memory.
+        """
+        source = SkillStore(other_db, readonly=True)
+        stats = ImportStats(total=source.count())
+        try:
+            for skill in source.iter_all():
+                success, replaced = self._add_skill_detail(skill)
+                if success:
+                    if replaced:
+                        stats.replaced += 1
+                    else:
+                        stats.added += 1
+                else:
+                    stats.skipped_duplicate += 1
+        finally:
+            source.close()
+        return stats
+
     def delete_skill(self, skill_id: str) -> bool:
         cur = self._conn.cursor()
         cur.execute("DELETE FROM skills WHERE id = ?", (skill_id,))

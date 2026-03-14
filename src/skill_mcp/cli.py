@@ -112,49 +112,124 @@ def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
 
 
 @main.command()
-@click.option("--force", is_flag=True, help="Overwrite existing database")
+@click.option("--replace", is_flag=True, help="Replace existing database entirely (default: merge)")
+@click.option("--include-index", is_flag=True, help="Also download pre-built vector index")
 @click.pass_context
-def pull(ctx, force: bool):
+def pull(ctx, replace: bool, include_index: bool):
     """Download pre-built skill dataset (~89K skills) from HuggingFace.
 
-    This is the fastest way to get started — downloads a ready-to-use
-    skills.db so you can skip manual import and dedup.
+    By default, merges downloaded skills into your existing store so your
+    custom skills are preserved. Use --replace to start fresh.
 
-    After pull, run `skill-mcp build-index` to create the vector index.
+    \b
+    Examples:
+      skill-mcp pull                   # Merge HF skills into local store
+      skill-mcp pull --include-index   # Also download pre-built vector index
+      skill-mcp pull --replace         # Replace local DB entirely
     """
-    from skill_mcp.hub import pull_dataset
+    import shutil
+
+    from skill_mcp.hub import download_skills_db
+    from skill_mcp.store import SkillStore
 
     config = _load_config_from_ctx(ctx)
     data_dir = config.resolved_data_dir
 
+    # Auto-init if needed
     if not data_dir.exists():
-        # Auto-init if needed
         from skill_mcp.config import Config, save_config
         data_dir.mkdir(parents=True, exist_ok=True)
-        cfg = Config(data_dir=str(data_dir))
-        save_config(cfg)
+        save_config(Config(data_dir=str(data_dir)))
         click.echo(f"Initialized {data_dir}")
 
-    click.echo(f"Downloading skills dataset from HuggingFace...")
-    try:
-        result = pull_dataset(data_dir, force=force)
-    except FileExistsError as e:
-        click.echo(str(e))
-        return
+    click.echo("Downloading skills from HuggingFace...")
+    cached_db = download_skills_db()
+    db_path = config.db_path
 
-    db_path = result["db"]
-    # Verify the download
+    if not db_path.exists() or replace:
+        # Fast path: no local data or explicit replace — copy directly
+        shutil.copy2(cached_db, db_path)
+        # Re-init FTS index (copy doesn't include virtual table data from triggers)
+        _rebuild_fts(db_path)
+        store = SkillStore(db_path, readonly=True)
+        click.echo(f"Loaded {store.count():,} skills")
+        store.close()
+    else:
+        # Merge: preserve existing custom skills
+        store = SkillStore(db_path)
+        before = store.count()
+        stats = store.merge_from(cached_db)
+        click.echo(f"Merged: {stats.added:,} new, {stats.replaced:,} upgraded, {stats.skipped_duplicate:,} unchanged")
+        click.echo(f"Store: {before:,} -> {store.count():,} skills")
+        store.close()
+
+    if include_index:
+        _pull_index(config)
+    else:
+        click.echo("\nNext step:")
+        click.echo("  skill-mcp build-index --backend sentence-transformers")
+
+
+def _rebuild_fts(db_path: Path) -> None:
+    """Rebuild FTS index after copying a database file."""
+    import sqlite3
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(
+            name, description, instructions,
+            content='skills', content_rowid='rowid'
+        );
+        CREATE TRIGGER IF NOT EXISTS skills_ai AFTER INSERT ON skills BEGIN
+            INSERT INTO skills_fts(rowid, name, description, instructions)
+            VALUES (new.rowid, new.name, new.description, new.instructions);
+        END;
+        CREATE TRIGGER IF NOT EXISTS skills_ad AFTER DELETE ON skills BEGIN
+            INSERT INTO skills_fts(skills_fts, rowid, name, description, instructions)
+            VALUES ('delete', old.rowid, old.name, old.description, old.instructions);
+        END;
+        INSERT INTO skills_fts(skills_fts) VALUES('rebuild');
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _pull_index(config) -> None:
+    """Download pre-built index and check consistency with store."""
+    import shutil
+
+    from skill_mcp.hub import download_index
+
+    click.echo("Downloading pre-built index...")
+    index_files = download_index()
+    index_dir = config.index_dir
+    index_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(index_files["faiss"], index_dir / "index.faiss")
+    shutil.copy2(index_files["meta"], index_dir / "skill_ids.json")
+
+    with open(index_dir / "skill_ids.json") as f:
+        meta = json.load(f)
+    index_count = len(meta.get("skill_ids", []))
+    emb = meta.get("embedding", {})
+    backend = emb.get("backend", "unknown")
+    model = emb.get("model", "unknown")
+    click.echo(f"Index: {index_count:,} vectors ({backend}/{model})")
+
+    # Sync config with index embedding settings
+    if emb:
+        from skill_mcp.config import save_config
+        config.embedding.backend = backend
+        config.embedding.model = model
+        save_config(config)
+
+    # Warn if store has skills not covered by the index
     from skill_mcp.store import SkillStore
-    store = SkillStore(db_path, readonly=True)
-    count = store.count()
-    cats = store.categories()
-    store.close()
-
-    click.echo(f"Downloaded {count:,} skills to {db_path}")
-    if cats:
-        click.echo(f"Categories: {len(cats)} ({', '.join(cats[:5])}{'...' if len(cats) > 5 else ''})")
-    click.echo(f"\nNext step:")
-    click.echo(f"  skill-mcp build-index --backend sentence-transformers")
+    if config.db_path.exists():
+        store = SkillStore(config.db_path, readonly=True)
+        db_count = store.count()
+        store.close()
+        if db_count > index_count:
+            click.echo(f"  Note: store has {db_count - index_count:,} skills not in index.")
+            click.echo(f"  Run `skill-mcp build-index --force` to include all.")
 
 
 @main.command("import")

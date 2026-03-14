@@ -127,26 +127,26 @@ With `all-MiniLM-L6-v2` (384-dim, local, free):
 ### Pre-built dataset (recommended)
 
 ```bash
-# Download 89K skills from HuggingFace — one command, no manual work
+# Download 89K curated skills from HuggingFace and merge into local store
 skill-mcp pull
 
-# Overwrite an existing database
-skill-mcp pull --force
+# Also download a pre-built vector index (skips build-index entirely)
+skill-mcp pull --include-index
+
+# Replace local DB entirely instead of merging
+skill-mcp pull --replace
 ```
 
-The pre-built dataset includes skills from LangSkills, SkillNet, Anthropic official, and community sources — already deduplicated and ready to index. Requires `pip install skill-retrieval-mcp[hf]`.
+`pull` **merges by default** — your custom skills are preserved. The pre-built dataset includes LangSkills, SkillNet, Anthropic official, and community sources, already deduplicated. Requires `pip install skill-retrieval-mcp[hf]`.
 
-### Import your own skills
+### Adding your own skills
 
 ```bash
-# Local SKILL.md directory (→ SkillSource.COMMUNITY)
+# Import from a directory of SKILL.md files
 skill-mcp import --source directory --path ~/my-skills/
 
-# Anthropic official skills repo (→ SkillSource.ANTHROPIC)
-skill-mcp import --source anthropic --path ~/anthropic-skills/
-
-# LangSkills SQLite bundle (→ SkillSource.LANGSKILLS)
-skill-mcp import --source langskills --path langskills.db
+# After adding custom skills, rebuild the index to include them
+skill-mcp build-index --force
 ```
 
 Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.
@@ -190,7 +190,7 @@ skill-mcp build-index --backend ollama --model nomic-embed-text --force
 
 ```
 skill-mcp init [--data-dir DIR] [--no-register]   Initialize data directory and config
-skill-mcp pull [--force]                           Download pre-built dataset from HuggingFace
+skill-mcp pull [--replace] [--include-index]        Download/merge pre-built dataset from HuggingFace
 skill-mcp import --source SOURCE --path PATH       Import skills into the store
 skill-mcp build-index [--backend B] [--model M]    Build FAISS vector index
 skill-mcp serve [--transport stdio|sse]            Start MCP server
