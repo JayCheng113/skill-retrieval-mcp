@@ -89,7 +89,7 @@ def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
 @main.command("import")
 @click.option(
     "--source",
-    type=click.Choice(["langskills", "skillnet", "anthropic", "directory"]),
+    type=click.Choice(["langskills", "anthropic", "directory"]),
     required=True,
 )
 @click.option("--path", "source_path", type=click.Path(exists=True), required=True)
@@ -112,9 +112,6 @@ def import_skills(source: str, source_path: str, db: str | None):
     elif source == "langskills":
         from skill_mcp.importers.langskills import LangSkillsImporter
         importer = LangSkillsImporter()
-    elif source == "skillnet":
-        from skill_mcp.importers.skillnet import SkillNetImporter
-        importer = SkillNetImporter()
     elif source == "anthropic":
         from skill_mcp.importers.anthropic import AnthropicImporter
         importer = AnthropicImporter()

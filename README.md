@@ -8,7 +8,7 @@ Works with any MCP-compatible agent: **Claude Code**, **Codex CLI**, **Gemini CL
 
 ## Why?
 
-Modern skill libraries contain **100K–250K+ skills** (LangSkills, SkillNet, Anthropic official, community). But agents can only keep **10–20 skills** in context at a time. Pre-loading is a dead end.
+Modern skill libraries contain **100K+ skills** (LangSkills, Anthropic official, community). But agents can only keep **10–20 skills** in context at a time. Pre-loading is a dead end.
 
 `skill-retrieval-mcp` solves this:
 
@@ -129,12 +129,9 @@ skill-mcp import --source anthropic --path ~/anthropic-skills/
 
 # LangSkills SQLite bundle (→ SkillSource.LANGSKILLS)
 skill-mcp import --source langskills --path langskills.db
-
-# SkillNet JSON-lines dump (→ SkillSource.SKILLNET)
-skill-mcp import --source skillnet --path skillnet.jsonl
 ```
 
-Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS > SKILLNET.
+Cross-source deduplication is automatic. Priority: ANTHROPIC > COMMUNITY > LANGSKILLS.
 
 ### SKILL.md Format
 
@@ -253,7 +250,7 @@ src/skill_mcp/
 ├── embeddings.py      # Multi-backend embeddings (OpenAI/ST/Ollama/mock)
 ├── retriever.py       # Vector similarity retrieval
 ├── dedup.py           # Content-hash deduplication with source priority
-└── importers/         # Pluggable importers (directory/langskills/skillnet/anthropic)
+└── importers/         # Pluggable importers (directory/langskills/anthropic)
 ```
 
 ~15 source files total. No agent framework, no evaluation infrastructure, no experiment runners — just skill storage, indexing, and serving.
@@ -278,7 +275,7 @@ src/skill_mcp/
 ## Development
 
 ```bash
-git clone https://github.com/your-org/skill-retrieval-mcp
+git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
 pytest tests/ -v

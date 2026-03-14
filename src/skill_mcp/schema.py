@@ -13,7 +13,6 @@ class SkillSource(str, Enum):
     """Origin of a skill."""
 
     LANGSKILLS = "langskills"
-    SKILLNET = "skillnet"
     ANTHROPIC = "anthropic"
     COMMUNITY = "community"
 

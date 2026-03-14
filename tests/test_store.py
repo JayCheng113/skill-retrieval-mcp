@@ -63,7 +63,7 @@ def test_dedup_higher_priority_replaces():
     store = SkillStore()
     s1 = Skill(
         name="s1", description="d", instructions="same content",
-        source=SkillSource.SKILLNET,
+        source=SkillSource.LANGSKILLS,
     )
     store.add_skill(s1)
     assert store.count() == 1
@@ -89,7 +89,7 @@ def test_dedup_lower_priority_rejected():
 
     s2 = Skill(
         name="s2", description="d", instructions="same content",
-        source=SkillSource.SKILLNET,
+        source=SkillSource.LANGSKILLS,
     )
     assert not store.add_skill(s2)
     assert store.count() == 1
