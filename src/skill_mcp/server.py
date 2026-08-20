@@ -6,10 +6,16 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Annotated
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from pydantic import Field
+
+try:  # mcp >= 2.0
+    from mcp.server import MCPServer as _FastServer
+except ImportError:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP as _FastServer
+
+from mcp.types import TextContent
 
 from skill_mcp.config import load_config
 from skill_mcp.embeddings import EmbeddingModel
@@ -19,7 +25,7 @@ from skill_mcp.store import SkillStore
 
 logger = logging.getLogger("skill_mcp")
 
-server = Server(
+server = _FastServer(
     "skill-retrieval",
     instructions=(
         "A knowledge base of 89K+ skills is available — covering virtually every "
@@ -39,115 +45,92 @@ _index: SkillIndex | None = None
 _embedding: EmbeddingModel | None = None
 
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    return [
-        Tool(
-            name="search_skills",
-            description=(
-                "Search 89K+ skills covering virtually every technical domain — "
-                "programming, DevOps, cloud, ML, databases, security, documentation, "
-                "API design, testing, project management, and more. "
-                "Each skill is a structured best-practice guide. "
-                "Search is < 5ms with zero API calls — when in doubt, search. "
-                "Returns summaries only — call get_skill for full instructions."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Natural language task description to search for",
-                    },
-                    "k": {
-                        "type": "integer",
-                        "description": "Number of results to return (default: 5)",
-                        "default": 5,
-                    },
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="get_skill",
-            description=(
-                "Fetch full step-by-step instructions for a skill by ID. "
-                "Always call this after search_skills or keyword_search "
-                "when you find a relevant skill — the search results contain "
-                "summaries only, this returns the complete guide with code examples "
-                "and best practices."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "skill_id": {
-                        "type": "string",
-                        "description": "The skill ID from search results",
-                    },
-                },
-                "required": ["skill_id"],
-            },
-        ),
-        Tool(
-            name="keyword_search",
-            description=(
-                "Search skills by exact keyword matching. "
-                "Prefer this over search_skills when you have specific terms — "
-                "tool names (pytest, webpack, terraform), error messages, CLI commands, "
-                "or technology names. Works without a vector index. "
-                "Returns summaries — call get_skill for full instructions."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Keywords to search for",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results (default: 10)",
-                        "default": 10,
-                    },
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="list_categories",
-            description=(
-                "List all skill categories with counts. "
-                "Use to discover what domains are covered or when the user asks "
-                "'what skills do you have', 'what can you help with', "
-                "or wants to browse available knowledge areas."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-    ]
+def _dispatch(name: str, handler, arguments: dict) -> str:
+    """Run a handler, log timing, and unwrap it to the JSON text payload.
 
-
-@server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    The tool functions below are ``async`` on purpose: mcp 2.x dispatches sync
+    tool callables to a worker thread, and the SQLite connection in SkillStore
+    is bound to the thread that opened it. Staying on the event loop keeps every
+    handler on the startup thread under both mcp 1.x and 2.x.
+    """
     logger.debug("tool_call: %s args=%s", name, arguments)
     t0 = time.perf_counter()
-
-    if name == "search_skills":
-        result = _handle_search_skills(arguments)
-    elif name == "get_skill":
-        result = _handle_get_skill(arguments)
-    elif name == "keyword_search":
-        result = _handle_keyword_search(arguments)
-    elif name == "list_categories":
-        result = _handle_list_categories()
-    else:
-        result = [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
-
+    result = handler(arguments)
     elapsed = (time.perf_counter() - t0) * 1000
     logger.info("tool_call: %s %.1fms", name, elapsed)
-    return result
+    return result[0].text
+
+
+@server.tool(
+    name="search_skills",
+    description=(
+        "Search 89K+ skills covering virtually every technical domain — "
+        "programming, DevOps, cloud, ML, databases, security, documentation, "
+        "API design, testing, project management, and more. "
+        "Each skill is a structured best-practice guide. "
+        "Search is < 5ms with zero API calls — when in doubt, search. "
+        "Returns summaries only — call get_skill for full instructions."
+    ),
+    structured_output=False,
+)
+async def search_skills(
+    query: Annotated[
+        str, Field(description="Natural language task description to search for")
+    ],
+    k: Annotated[int, Field(description="Number of results to return (default: 5)")] = 5,
+) -> str:
+    return _dispatch("search_skills", _handle_search_skills, {"query": query, "k": k})
+
+
+@server.tool(
+    name="get_skill",
+    description=(
+        "Fetch full step-by-step instructions for a skill by ID. "
+        "Always call this after search_skills or keyword_search "
+        "when you find a relevant skill — the search results contain "
+        "summaries only, this returns the complete guide with code examples "
+        "and best practices."
+    ),
+    structured_output=False,
+)
+async def get_skill(
+    skill_id: Annotated[str, Field(description="The skill ID from search results")],
+) -> str:
+    return _dispatch("get_skill", _handle_get_skill, {"skill_id": skill_id})
+
+
+@server.tool(
+    name="keyword_search",
+    description=(
+        "Search skills by exact keyword matching. "
+        "Prefer this over search_skills when you have specific terms — "
+        "tool names (pytest, webpack, terraform), error messages, CLI commands, "
+        "or technology names. Works without a vector index. "
+        "Returns summaries — call get_skill for full instructions."
+    ),
+    structured_output=False,
+)
+async def keyword_search(
+    query: Annotated[str, Field(description="Keywords to search for")],
+    limit: Annotated[
+        int, Field(description="Maximum number of results (default: 10)")
+    ] = 10,
+) -> str:
+    return _dispatch("keyword_search", _handle_keyword_search, {"query": query, "limit": limit})
+
+
+@server.tool(
+    name="list_categories",
+    description=(
+        "List all skill categories with counts. "
+        "Use to discover what domains are covered or when the user asks "
+        "'what skills do you have', 'what can you help with', "
+        "or wants to browse available knowledge areas."
+    ),
+    structured_output=False,
+)
+async def list_categories() -> str:
+    return _dispatch("list_categories", lambda _: _handle_list_categories(), {})
 
 
 def _handle_search_skills(arguments: dict) -> list[TextContent]:
@@ -293,29 +276,13 @@ async def run_server(config_path: Path | None = None, transport: str = "stdio") 
 
     if transport == "sse":
         try:
-            from starlette.applications import Starlette
-            from starlette.routing import Route
-            from mcp.server.sse import SseServerTransport
-            import uvicorn
+            import starlette  # noqa: F401
+            import uvicorn  # noqa: F401
         except ImportError:
             raise SystemExit(
                 "SSE transport requires extra dependencies. Install with:\n"
                 "  pip install skill-retrieval-mcp[sse]"
             )
-
-        sse = SseServerTransport("/messages")
-
-        async def handle_sse(request):
-            async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
-                await server.run(streams[0], streams[1], server.create_initialization_options())
-
-        app = Starlette(
-            routes=[
-                Route("/sse", endpoint=handle_sse),
-                Route("/messages", endpoint=sse.handle_post_message, methods=["POST"]),
-            ]
-        )
-        uvicorn.run(app, host="127.0.0.1", port=8000)
+        await server.run_sse_async()
     else:
-        async with stdio_server() as (read_stream, write_stream):
-            await server.run(read_stream, write_stream, server.create_initialization_options())
+        await server.run_stdio_async()
