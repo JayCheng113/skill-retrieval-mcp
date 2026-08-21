@@ -74,9 +74,7 @@ def _dispatch(name: str, handler, arguments: dict) -> str:
     structured_output=False,
 )
 async def search_skills(
-    query: Annotated[
-        str, Field(description="Natural language task description to search for")
-    ],
+    query: Annotated[str, Field(description="Natural language task description to search for")],
     k: Annotated[int, Field(description="Number of results to return (default: 5)")] = 5,
 ) -> str:
     return _dispatch("search_skills", _handle_search_skills, {"query": query, "k": k})
@@ -112,9 +110,7 @@ async def get_skill(
 )
 async def keyword_search(
     query: Annotated[str, Field(description="Keywords to search for")],
-    limit: Annotated[
-        int, Field(description="Maximum number of results (default: 10)")
-    ] = 10,
+    limit: Annotated[int, Field(description="Maximum number of results (default: 10)")] = 10,
 ) -> str:
     return _dispatch("keyword_search", _handle_keyword_search, {"query": query, "limit": limit})
 
