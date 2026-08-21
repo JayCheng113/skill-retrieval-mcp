@@ -1,5 +1,6 @@
 """Tests for MCP server tool handlers."""
 
+import asyncio
 import json
 
 import pytest
@@ -103,14 +104,28 @@ def test_search_skills_no_index():
     store.close()
 
 
+def test_search_skills_through_mcp_dispatch():
+    """Go through the registered tool, not the handler directly.
+
+    mcp 2.x runs sync tool callables on a worker thread, which breaks the
+    thread-bound SQLite connection in SkillStore. Only a dispatched call sees
+    that, so this is what keeps the tool functions async.
+    """
+    store, _ = _setup_server()
+    result = asyncio.run(srv.server.call_tool("search_skills", {"query": "debug", "k": 2}))
+    content = getattr(result, "content", result)  # mcp 2.x wraps in CallToolResult
+    data = json.loads(content[0].text)
+    assert len(data) == 2
+    assert all("instructions" not in r for r in data)
+    store.close()
+
+
 # ── Tool description tests ──────────────────────────────────────────
 
 
 @pytest.fixture()
 def tools():
     """Fetch the tool list once."""
-    import asyncio
-
     return asyncio.run(srv.server.list_tools())
 
 

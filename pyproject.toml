@@ -23,7 +23,10 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mcp>=1.0",
+    # 1.14 is the floor: earlier releases crash in Tool.from_function on
+    # Annotated[...] parameters (issubclass on a non-class annotation).
+    "mcp>=1.14",
+    "pydantic>=2.11",
     "faiss-cpu>=1.8",
     "numpy>=1.26",
     "click>=8.0",
@@ -43,7 +46,7 @@ ollama = ["httpx>=0.27"]
 hf = ["huggingface-hub>=0.20"]
 sse = ["starlette>=0.27", "uvicorn>=0.20"]
 all = ["openai>=1.50", "tiktoken>=0.7", "sentence-transformers>=3.0", "httpx>=0.27", "huggingface-hub>=0.20", "starlette>=0.27", "uvicorn>=0.20"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff==0.16.3"]
 
 [project.scripts]
 skill-mcp = "skill_mcp.cli:main"
@@ -51,3 +54,9 @@ skill-mcp = "skill_mcp.cli:main"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+# Pinned explicitly: ruff's implicit default rule set has grown over time, so
+# leaving it unset makes CI fail on lint findings that arrive with a ruff bump
+# rather than with a code change.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
