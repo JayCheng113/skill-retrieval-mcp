@@ -30,14 +30,26 @@
           └─────────────────────┘
 ```
 
-~1850 lines across 16 source files.
+~1950 lines across 17 source files.
+
+## mcp Version Support
+
+`server.py` builds on the high-level server API, which ships under two names:
+`FastMCP` on mcp 1.x and `MCPServer` on mcp 2.x. The `.tool()` signature is the
+same on both, so a try/except import is the whole shim.
+
+The declared floor is `mcp>=1.14`. Earlier releases crash in
+`Tool.from_function` on `Annotated[...]` parameters — they call `issubclass()`
+on an annotation that is not a class. CI runs a dedicated `test-mcp-floor` leg
+pinned to `mcp==1.14.0` so the FastMCP branch of the shim stays covered; the
+main matrix resolves to latest and covers the `MCPServer` branch.
 
 ## Module Responsibilities
 
 | Module | Lines | Role |
 |--------|-------|------|
 | `cli.py` | 542 | CLI commands, orchestration, no business logic |
-| `server.py` | 295 | MCP protocol handlers, server instructions, structured logging, read-only runtime |
+| `server.py` | 288 | MCP protocol handlers, server instructions, structured logging, read-only runtime |
 | `store.py` | 250 | SQLite CRUD + FTS5, dedup-on-insert, batch commit, merge |
 | `index.py` | 139 | FAISS build/update/search/save/load |
 | `embeddings.py` | 112 | Backend abstraction (ST, OpenAI, Ollama, mock) |
@@ -167,9 +179,11 @@ CLI exposes `--log-level` (or env `SKILL_MCP_LOG_LEVEL`). `serve` defaults to IN
 
 ### Adding a new MCP tool
 
-1. Add `Tool` to `list_tools()` in `server.py`
-2. Add handler function `_handle_*` with `_store` null check
-3. Add dispatch in `call_tool()`
+1. Add an `async def` decorated with `@server.tool(name=..., description=..., structured_output=False)` in `server.py`
+2. Annotate each parameter with `Annotated[T, Field(description=...)]` — the input schema is derived from the signature
+3. Add handler function `_handle_*` with `_store` null check, and route to it via `_dispatch`
+
+Tools must stay `async`. mcp 2.x runs sync tool callables on a worker thread, and `SkillStore` holds a thread-bound SQLite connection.
 
 ### Adding a new skill source
 
@@ -208,7 +222,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 139 tests, ~0.7s
+pytest tests/ -v    # 140 tests, ~0.7s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
@@ -289,7 +303,7 @@ Browse available domains. Useful for discovery and scoping searches.
 
 ## Dependencies
 
-Core: `mcp`, `faiss-cpu`, `numpy`, `click`, `pyyaml`, `tqdm`
+Core: `mcp`, `pydantic`, `faiss-cpu`, `numpy`, `click`, `pyyaml`, `tqdm`
 
 Optional:
 - `[local]` — `sentence-transformers` (default embedding backend)
