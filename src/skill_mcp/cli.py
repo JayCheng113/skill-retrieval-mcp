@@ -308,7 +308,7 @@ def _pull_index(config) -> None:
 @main.command("import")
 @click.option(
     "--source",
-    type=click.Choice(["langskills", "anthropic", "directory"]),
+    type=click.Choice(["curated", "anthropic", "directory"]),
     required=True,
 )
 @click.option("--path", "source_path", type=click.Path(exists=True), required=True)
@@ -337,10 +337,10 @@ def import_skills(ctx, source: str, source_path: str, db: str | None, no_index: 
         from skill_mcp.importers.directory import DirectoryImporter
 
         importer = DirectoryImporter()
-    elif source == "langskills":
-        from skill_mcp.importers.langskills import LangSkillsImporter
+    elif source == "curated":
+        from skill_mcp.importers.curated import CuratedImporter
 
-        importer = LangSkillsImporter()
+        importer = CuratedImporter()
     elif source == "anthropic":
         from skill_mcp.importers.anthropic import AnthropicImporter
 

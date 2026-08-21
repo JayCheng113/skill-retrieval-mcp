@@ -58,7 +58,7 @@ main matrix resolves to latest and covers the `MCPServer` branch.
 | `hub.py` | 60 | HuggingFace download (DB + index by backend/model) |
 | `retriever.py` | 37 | query → embed → FAISS search → store lookup |
 | `dedup.py` | 28 | Source-priority dedup by content_hash |
-| `importers/` | ~130 | Directory, LangSkills, Anthropic parsers + shared frontmatter |
+| `importers/` | ~300 | Curated, Directory, Anthropic parsers + shared frontmatter |
 
 ## Data Model
 
@@ -115,6 +115,14 @@ ANTHROPIC(4) > COMMUNITY(3) > LANGSKILLS(2) > SKILLNET(1)
 ```
 
 Higher priority replaces lower. Equal or lower is silently skipped. The `dedup` CLI command only catches duplicates injected via raw SQL (bypassing `_add_skill_detail`).
+
+`LANGSKILLS` and `SKILLNET` no longer have importers. The enum values stay so an older `skills.db` still deserializes instead of raising on read.
+
+### Curated import: an unvetted repo aborts the whole run
+
+`CuratedImporter` keys every on-disk `<owner>/<repo>` directory against `CURATED_REPOS`, a manifest of repositories whose licence was checked by hand. A directory with no manifest entry raises `UnvettedRepositoryError` and nothing is written — skipping it silently would let unlicensed content reach the corpus on the next careless clone, and the corpus is redistributed.
+
+Every imported row therefore carries `metadata["license"]`, `repo`, `repo_url` and `url`. When a skill declares its own narrower licence in frontmatter (K-Dense ships BSD-3-Clause files under an MIT repo), it is kept verbatim as `declared_license` beside the repo licence rather than reconciled.
 
 ### Commit strategy: batch, not per-row
 
@@ -190,6 +198,12 @@ Tools must stay `async`. mcp 2.x runs sync tool callables on a worker thread, an
 1. Add variant to `SkillSource` enum in `schema.py`
 2. Add priority in `dedup.py:_SOURCE_PRIORITY`
 
+### Adding a repository to the curated corpus
+
+1. Read its LICENSE and confirm it permits redistribution
+2. Add a `CuratedRepo(slug, spdx, source)` entry to `CURATED_REPOS` in `importers/curated.py`
+3. Clone it to `<root>/<owner>/<repo>` and re-run `import --source curated`
+
 ## Config
 
 ```yaml
@@ -222,7 +236,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 140 tests, ~0.7s
+pytest tests/ -v    # 143 tests, ~0.7s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
@@ -242,6 +256,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | Data-dir/CLI | 10 | global override, envvar, nonexistent path |
 | Auto-index | 6 | incremental, no-index, mismatch, no-existing-index, multiple imports |
 | Source compat | 2 | SKILLNET store + dedup priority |
+| Curated importer | 3 | unvetted repo aborts, licence+URL on every row, category |
 
 ## MCP Server Instructions
 
