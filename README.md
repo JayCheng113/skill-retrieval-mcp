@@ -178,4 +178,4 @@ Architecture and design decisions: [`dev.md`](dev.md)
 
 ## License
 
-MIT
+MIT — see [`LICENSE`](LICENSE).
