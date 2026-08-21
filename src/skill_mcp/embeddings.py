@@ -32,7 +32,12 @@ class EmbeddingModel:
                 raise SystemExit(
                     "sentence-transformers backend requires: pip install skill-retrieval-mcp[local]"
                 )
-            self._model = SentenceTransformer(model_name)
+            # Revalidating an already-cached model against huggingface.co costs
+            # ~5s of round trips on every startup, so try the local copy first.
+            try:
+                self._model = SentenceTransformer(model_name, local_files_only=True)
+            except Exception:
+                self._model = SentenceTransformer(model_name)
             self._dimension = self._model.get_sentence_embedding_dimension()
         elif backend == "ollama":
             self._ollama_url = "http://localhost:11434/api/embeddings"

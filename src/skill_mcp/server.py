@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import threading
 import time
-from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field
@@ -17,7 +18,7 @@ except ImportError:  # mcp 1.x
 
 from mcp.types import TextContent
 
-from skill_mcp.config import load_config
+from skill_mcp.config import Config
 from skill_mcp.embeddings import EmbeddingModel
 from skill_mcp.index import SkillIndex
 from skill_mcp.retriever import retrieve
@@ -28,14 +29,23 @@ logger = logging.getLogger("skill_mcp")
 server = _FastServer(
     "skill-retrieval",
     instructions=(
-        "A knowledge base of 89K+ skills is available — covering virtually every "
-        "technical domain: programming, DevOps, cloud, ML, databases, security, "
-        "documentation, API design, testing, project management, and more. "
-        "Each skill is a structured best-practice guide. "
+        "A local library of curated skills — each one a procedural guide written "
+        "by the tool's own maintainers, not a generated summary. "
+        "Coverage is deep but narrow. It is strongest on Google Cloud "
+        "(GKE, BigQuery, Cloud Run, IAM, Vertex/Agent Platform, Google Ads and "
+        "Mobile Ads APIs) and on computational science (single-cell and bulk "
+        "RNA-seq, cheminformatics, structural biology, statistics, scientific "
+        "writing and figures), with smaller sets on agent engineering practice, "
+        "frontend and API design, and Obsidian. It covers little else: AWS, Azure, "
+        "Rust, iOS, self-hosted databases and most web infrastructure are absent. "
         "Workflow: search_skills (semantic) or keyword_search (exact terms) → "
-        "review summaries → get_skill to fetch full instructions. "
-        "Search is < 5ms with zero API calls — when in doubt, search. "
-        "If no relevant skill is found, fall back to web search or other tools."
+        "read the returned descriptions → get_skill for the full guide. "
+        "Search is < 5ms with zero API calls, so searching costs you nothing. "
+        "Similarity scores are NOT calibrated confidence: a query the library "
+        "cannot answer still returns five results, and its top score can exceed "
+        "that of a genuine hit. Decide from the description, never the score. "
+        "If nothing returned actually matches the task, say so and use web search "
+        "or your own knowledge instead."
     ),
 )
 
@@ -43,6 +53,34 @@ server = _FastServer(
 _store: SkillStore | None = None
 _index: SkillIndex | None = None
 _embedding: EmbeddingModel | None = None
+_embedding_spec: tuple[str, str] | None = None
+_embedding_lock = threading.Lock()
+
+
+def _get_embedding() -> EmbeddingModel | None:
+    """Build the embedding model on first use, at most once.
+
+    Importing sentence-transformers costs ~6s and HuggingFace cache validation
+    another ~5s. Paying that inside ``run_server`` stalled the MCP handshake for
+    fourteen seconds, which most clients cannot distinguish from a hung server.
+    """
+    global _embedding
+    if _embedding is not None:
+        return _embedding
+    if _embedding_spec is None:
+        return None
+    with _embedding_lock:
+        if _embedding is None:
+            backend, model = _embedding_spec
+            t0 = time.perf_counter()
+            _embedding = EmbeddingModel(model_name=model, backend=backend)
+            logger.info(
+                "embedding: loaded %s/%s in %.0fms",
+                backend,
+                model,
+                (time.perf_counter() - t0) * 1000,
+            )
+    return _embedding
 
 
 def _dispatch(name: str, handler, arguments: dict) -> str:
@@ -64,12 +102,14 @@ def _dispatch(name: str, handler, arguments: dict) -> str:
 @server.tool(
     name="search_skills",
     description=(
-        "Search 89K+ skills covering virtually every technical domain — "
-        "programming, DevOps, cloud, ML, databases, security, documentation, "
-        "API design, testing, project management, and more. "
-        "Each skill is a structured best-practice guide. "
-        "Search is < 5ms with zero API calls — when in doubt, search. "
-        "Returns summaries only — call get_skill for full instructions."
+        "Semantic search over a curated skill library. Deep but narrow: "
+        "strongest on Google Cloud and computational science, with smaller sets "
+        "on agent engineering practice, frontend and API design, and Obsidian. "
+        "Phrase the query as the task you are doing, not as a keyword. "
+        "Search is < 5ms with zero API calls. "
+        "Scores are relative, not confidence — an unanswerable query still "
+        "returns results, so judge each hit by its description. "
+        "Returns summaries only — call get_skill for the full guide."
     ),
     structured_output=False,
 )
@@ -118,10 +158,11 @@ async def keyword_search(
 @server.tool(
     name="list_categories",
     description=(
-        "List all skill categories with counts. "
-        "Use to discover what domains are covered or when the user asks "
-        "'what skills do you have', 'what can you help with', "
-        "or wants to browse available knowledge areas."
+        "List the skill categories that carry one, with counts. "
+        "Categories come from the upstream repository layout, so most skills "
+        "have none and the counts here cover well under half the library — "
+        "an absent category means unlabelled, not uncovered. "
+        "Use search_skills to find out what is actually there."
     ),
     structured_output=False,
 )
@@ -130,7 +171,8 @@ async def list_categories() -> str:
 
 
 def _handle_search_skills(arguments: dict) -> list[TextContent]:
-    if _store is None or _index is None or _embedding is None:
+    embedding = _get_embedding()
+    if _store is None or _index is None or embedding is None:
         return [
             TextContent(
                 type="text",
@@ -145,7 +187,7 @@ def _handle_search_skills(arguments: dict) -> list[TextContent]:
     query = arguments["query"]
     k = arguments.get("k", 5)
 
-    results = retrieve(query, _store, _index, _embedding, k=k)
+    results = retrieve(query, _store, _index, embedding, k=k)
     logger.debug("search: query=%r k=%d results=%d", query, k, len(results))
     output = [
         {
@@ -236,11 +278,14 @@ def _handle_list_categories() -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(counts, ensure_ascii=False))]
 
 
-async def run_server(config_path: Path | None = None, transport: str = "stdio") -> None:
-    """Start the MCP server."""
-    global _store, _index, _embedding
+async def run_server(config: Config, transport: str = "stdio") -> None:
+    """Start the MCP server.
 
-    config = load_config(config_path)
+    Takes a resolved ``Config`` rather than a path: ``--data-dir`` is an
+    in-memory override that no config file necessarily records, so re-loading
+    from disk here would drop it and serve an empty store instead.
+    """
+    global _store, _index, _embedding_spec
 
     # Load store in read-only mode
     db_path = config.db_path
@@ -258,13 +303,15 @@ async def run_server(config_path: Path | None = None, transport: str = "stdio") 
         emb_info = _index.embedding_info
         backend = emb_info.get("backend", config.embedding.backend)
         model = emb_info.get("model", config.embedding.model)
-        _embedding = EmbeddingModel(model_name=model, backend=backend)
+        _embedding_spec = (backend, model)
         logger.info(
             "index: loaded %d vectors (%s/%s)",
             len(_index.skill_ids),
             backend,
             model,
         )
+        # Warm the model off the event loop so the handshake does not wait on it.
+        asyncio.get_running_loop().run_in_executor(None, _get_embedding)
     else:
         logger.warning("index: not found at %s, semantic search disabled", index_dir)
 

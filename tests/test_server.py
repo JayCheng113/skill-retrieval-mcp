@@ -138,10 +138,19 @@ class TestToolDescriptions:
 
     def test_search_skills_has_behavioral_trigger(self, tools):
         desc = _desc(tools, "search_skills")
-        # Must encourage proactive searching (breadth + low cost)
-        assert "when in doubt" in desc.lower()
+        # Must tell the agent searching is cheap, so it searches proactively
+        assert any(s in desc.lower() for s in ("5ms", "zero api", "costs you nothing"))
         # Must reference the follow-up tool
         assert "get_skill" in desc
+
+    def test_search_skills_warns_the_score_is_not_confidence(self, tools):
+        """Out-of-domain queries top out at 0.451, above the in-domain median of
+        0.428, so no threshold separates a real hit from noise. An agent reading
+        the score as confidence will act on a confidently wrong result; the
+        description has to deny that reading and point at the descriptions."""
+        desc = _desc(tools, "search_skills").lower()
+        assert "score" in desc
+        assert "description" in desc
 
     def test_search_skills_no_instructions_in_results(self, tools):
         desc = _desc(tools, "search_skills")
@@ -160,10 +169,14 @@ class TestToolDescriptions:
         # Must also reference get_skill
         assert "get_skill" in desc
 
-    def test_list_categories_has_use_case(self, tools):
+    def test_list_categories_admits_its_coverage_is_partial(self, tools):
+        """Only 147 of 373 skills carry a category, and the entire computational
+        science set carries none. An agent that reads these counts as the shape
+        of the library concludes it is a cloud-only tool, so the description has
+        to say the counts are incomplete and send it to search instead."""
         desc = _desc(tools, "list_categories")
-        # Must not be a bare "list categories" — should say why
-        assert "discover" in desc.lower() or "browse" in desc.lower()
+        assert "search_skills" in desc
+        assert any(s in desc.lower() for s in ("under half", "most skills", "unlabelled"))
 
     def test_all_descriptions_are_nonempty(self, tools):
         for tool in tools:

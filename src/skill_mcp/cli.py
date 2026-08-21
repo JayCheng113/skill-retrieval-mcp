@@ -84,7 +84,7 @@ def init(ctx, data_dir: str | None, no_register: bool):
         _try_register_mcp(data_path)
 
     click.echo("\nInitialization complete! Next steps:")
-    click.echo("  Option A (quick start with 89K pre-built skills):")
+    click.echo("  Option A (quick start with the curated skill corpus):")
     click.echo("    skill-mcp pull --include-index")
     click.echo("  Option B (import your own skills):")
     click.echo("    skill-mcp import --source directory --path <skills-dir>")
@@ -168,7 +168,7 @@ def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
 @click.option("--include-index", is_flag=True, help="Also download pre-built vector index")
 @click.pass_context
 def pull(ctx, replace: bool, include_index: bool):
-    """Download pre-built skill dataset (~89K skills) from HuggingFace.
+    """Download the curated skill corpus from HuggingFace.
 
     By default, merges downloaded skills into your existing store so your
     custom skills are preserved. Use --replace to start fresh.
@@ -519,7 +519,7 @@ def serve(ctx, transport: str):
         )
 
     config = _load_config_from_ctx(ctx)
-    asyncio.run(run_server(config_path=config.config_path, transport=transport))
+    asyncio.run(run_server(config, transport=transport))
 
 
 @main.command()
