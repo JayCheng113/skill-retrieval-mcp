@@ -111,7 +111,7 @@ def tools():
     """Fetch the tool list once."""
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(srv.list_tools())
+    return asyncio.run(srv.server.list_tools())
 
 
 def _desc(tools, name: str) -> str:
