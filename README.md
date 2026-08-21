@@ -1,8 +1,8 @@
 # skill-retrieval-mcp
 
-> Your agent doesn't need you to find the right skills. It needs to search 89K of them on its own.
+> Your agent doesn't need you to pick the right skill. It needs to search for one on its own.
 
-An MCP server that gives AI agents on-demand access to **89K+ skills** covering virtually every technical domain. The agent searches as it works — the same way you look up docs mid-task.
+An MCP server that gives AI agents on-demand access to a licence-vetted corpus of agent skills, collected from seven upstream repositories. The agent searches as it works — the same way you look up docs mid-task.
 
 Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any MCP-compatible agent.
 
@@ -12,53 +12,56 @@ You give your agent a skill — "always use TDD," "follow this API style" — an
 
 - **You don't know what exists.** There are thousands of skills out there. You install the 10 you happen to find — everything else, the agent guesses.
 - **You can't install what you can't name.** Mid-task, the agent needs a skill for "OIDC-based PyPI publishing" — but you'd never think to install that in advance.
-- **89K skills can't live in `~/.claude/skills/`.** Even with lazy loading, thousands of skill descriptions bloat the system prompt.
+- **A skill library doesn't fit in the prompt.** Lazy loading still puts every skill's name and description in front of the model — 37K tokens for this corpus, before the agent has read a single one. The instructions themselves are another 960K.
 
 ## The Fix
 
 Don't install skills upfront. **Search them at runtime.**
 
 ```
-You: "Help me set up CI/CD for this Python project"
+You: "Deploy this service to GKE"
 
 ─── Step 1: Agent searches ───────────────────────────────────────────
 
-Agent: search_skills("github actions python CI pipeline")        ← 3ms
+Agent: search_skills("deploy a containerised service on kubernetes")   ← 4ms
      → 5 results (summaries only, no full instructions):
-       1. "github-actions-python"    (0.91) - CI/CD pipelines for Python with pytest and linting
-       2. "github-actions-docker"    (0.72) - Docker build and push in GitHub Actions
-       3. "gitlab-ci-python"         (0.68) - GitLab CI/CD for Python projects
-       4. "circleci-python"          (0.61) - CircleCI configuration for Python
-       5. "jenkins-pipeline"         (0.45) - Jenkins declarative pipelines
+       1. "gke-service-networking"   (0.56) - Gateway API, Ingress, Cloud Armor, NEGs, managed SSL
+       2. "gke-workload-scaling"     (0.51) - HPA and VPA for GKE workloads
+       3. "gke-manifest-generation"  (0.51) - Production-ready Kubernetes YAML for Autopilot/Standard
+       4. "gke-app-onboarding"       (0.46) - Containerizing and deploying an app to GKE for the first time
+       5. "gke-basics"               (0.44) - Cluster provisioning, credentials, Autopilot vs Standard
 
-─── Step 2: Agent reads descriptions, picks #1 ──────────────────────
+─── Step 2: Agent reads the descriptions and picks #4, not #1 ────────
 
-Agent: get_skill("github-actions-python")
-     → gets full guide: step-by-step setup, matrix testing, caching, best practices
-     → writes .github/workflows/ci.yml
+Agent: get_skill("gke-app-onboarding")
+     → gets full guide: containerization, manifests, migration path
+     → writes the Dockerfile and deployment.yaml
 
 ─── Step 3: New need emerges mid-task ────────────────────────────────
 
-Agent: # workflow needs PyPI publishing — search again with different query
-       search_skills("pypi publish trusted publisher")           ← 2ms
-     → "pypi-trusted-publishing" (0.87) - OIDC-based PyPI publishing without API keys
-     → reads guide, adds publish step
+Agent: # the service has to survive traffic spikes — search again
+       search_skills("autoscale pods on cpu and memory")               ← 4ms
+     → "gke-workload-scaling" (0.61) - Horizontal and Vertical Pod Autoscaler for GKE
+     → reads guide, adds the HPA manifest
 ```
 
 Key behaviors:
 
-- **Search returns summaries, not full instructions** — the agent reads descriptions and scores to decide which skills are worth fetching. 5 results searched, 1 skill read → 80% token savings.
-- **The agent searches multiple times** as the task evolves. Different phase → different query → different skill.
-- **Queries are shaped by context.** The second search includes "trusted publisher" — a term the agent picked up while working, not something the user said.
+- **Search returns summaries, not full instructions** — the agent reads descriptions and scores to decide which skills are worth fetching. Five summaries cost a few hundred tokens; the one skill it actually reads costs about 2,400.
+- **The top hit is not always the right one.** The agent picked #4 because its description says "for the first time" — a judgement the ranking can't make. That is why search returns descriptions instead of auto-injecting the winner.
+- **The agent searches again as the task evolves.** Neither "autoscale" nor "pods" appeared in what the user asked for; those are terms the agent picked up while writing the manifest.
 
-89K skills. < 5ms search. Zero LLM calls. Runs locally.
+Both searches above are real output from the shipped corpus, not an illustration.
+
+< 5ms search, measured end to end including query embedding. Zero LLM calls. Runs locally.
 
 | | Installing skills manually | skill-retrieval-mcp |
 |---|---|---|
-| **Scale** | Dozens, if you're diligent | 89K+ |
+| **Scale** | Dozens, if you're diligent | 373 across 7 upstream repos |
 | **Discovery** | You find and install each one | Agent searches by need |
 | **Selection** | You pick upfront | Agent picks per-task |
 | **Search** | Name matching on descriptions | Semantic, < 5ms, local FAISS |
+| **Provenance** | Whatever you happened to clone | Every skill carries its repo, URL and SPDX licence |
 
 ## Quick Start
 
@@ -68,14 +71,14 @@ Three commands. Takes about 2 minutes (mostly download time).
 # 1. Install
 pip install "skill-retrieval-mcp[local,hf]"
 
-# 2. Download 89K skills + pre-built vector index
+# 2. Download the skill corpus + pre-built vector index
 skill-mcp pull --include-index
 
 # 3. Register with your agent (auto-detects Claude Code, Cursor, etc.)
 skill-mcp init
 ```
 
-Done. Your agent now searches 89K skills on demand.
+Done. Your agent now searches the corpus on demand.
 
 <details>
 <summary>Manual registration (if <code>init</code> doesn't detect your agent)</summary>
@@ -91,9 +94,21 @@ Done. Your agent now searches 89K skills on demand.
 
 ## What's In the Knowledge Base
 
-89,267 skills across every major technical domain, sourced from [LangSkills](https://github.com/langskills), [SkillNet](https://github.com/SkillNet), Anthropic official, and community contributions.
+373 skills, collected from seven repositories whose licences were read before anything was imported:
 
-Each skill is a structured best-practice guide — not a one-liner, but a step-by-step how-to with code examples, common pitfalls, and recommendations.
+| Repository | Skills | Licence |
+|------------|--------|---------|
+| [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills) | 163 | MIT |
+| [google/skills](https://github.com/google/skills) | 112 | Apache-2.0 |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | 35 | MIT |
+| [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills) | 24 | MIT |
+| [anthropics/skills](https://github.com/anthropics/skills) | 20 | Apache-2.0 |
+| [obra/superpowers](https://github.com/obra/superpowers) | 14 | MIT |
+| [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills) | 5 | MIT |
+
+Each skill is a structured best-practice guide — not a one-liner, but a step-by-step how-to with code examples, common pitfalls, and recommendations. The median one runs about 9,600 characters.
+
+Every row records the repository it came from, its upstream URL and its SPDX licence, so anything you get back can be traced and attributed. Repositories without a licence permitting redistribution are not imported, even when their content is good.
 
 Run `skill-mcp status` to see what you have locally, or use `list_categories` to browse domains.
 
@@ -139,15 +154,15 @@ Default: `sentence-transformers/all-MiniLM-L6-v2` — local, free, no API key. P
 
 | Backend | Pre-built index | Requires |
 |---------|-----------------|----------|
-| `sentence-transformers` (default) | 137MB | Nothing |
-| `openai` | 1.1GB | `OPENAI_API_KEY` |
+| `sentence-transformers` (default) | yes | Nothing |
+| `openai` | build locally | `OPENAI_API_KEY` |
 | `ollama` | build locally | Ollama running |
 
 ```bash
 # Switch to OpenAI embeddings:
 # 1. Edit ~/.skill-mcp/config.yaml (set backend: openai, model: text-embedding-3-large)
-# 2. Download matching index:
-skill-mcp pull --include-index
+# 2. Build the matching index — an index is only valid for the model that built it:
+skill-mcp build-index --backend openai
 ```
 
 ## CLI Reference
@@ -171,7 +186,7 @@ All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR`.
 git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
-pytest tests/ -v    # 140 tests, ~0.7s
+pytest tests/ -v    # 143 tests, ~0.7s
 ```
 
 Architecture and design decisions: [`dev.md`](dev.md)

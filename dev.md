@@ -93,14 +93,13 @@ skills (id PK, name, description, instructions, source, source_id,
 
 ```
 zcheng256/skillretrieval-data (dataset repo)
-├── processed/skills.db                                    960MB
-├── indices/sentence-transformers/all-MiniLM-L6-v2/        137MB  (384-dim)
-│   ├── index.faiss
-│   └── skill_ids.json
-└── indices/openai/text-embedding-3-large/                 1.1GB  (3072-dim)
+├── processed/skills.db                                    6.4MB
+└── indices/sentence-transformers/all-MiniLM-L6-v2/               (384-dim)
     ├── index.faiss
     └── skill_ids.json
 ```
+
+Only the default backend has a published index. An index is a list of `skill_ids` in FAISS row order, so it is valid only for the exact corpus that built it — `retrieve()` drops IDs the store doesn't have, which turns a mismatched index into silently empty results rather than an error. Publishing an index for a corpus we no longer ship would be worse than publishing none.
 
 `pull --include-index` downloads the index matching `config.embedding.backend/model`. `download_index()` in `hub.py` constructs the path as `indices/{backend}/{model}/`.
 
@@ -124,9 +123,11 @@ Higher priority replaces lower. Equal or lower is silently skipped. The `dedup` 
 
 Every imported row therefore carries `metadata["license"]`, `repo`, `repo_url` and `url`. When a skill declares its own narrower licence in frontmatter (K-Dense ships BSD-3-Clause files under an MIT repo), it is kept verbatim as `declared_license` beside the repo licence rather than reconciled.
 
+None of the seven repos use frontmatter `tags`, so `tags` is empty for all 373 curated rows. It stays in the schema because directory imports of your own skills do populate it.
+
 ### Commit strategy: batch, not per-row
 
-`_add_skill_detail` does NOT commit. Public methods (`add_skill`, `add_skills`, `merge_from`) commit once after all mutations. This makes `merge_from` with 89K skills ~100x faster than per-row commits (one fsync vs 89K).
+`_add_skill_detail` does NOT commit. Public methods (`add_skill`, `add_skills`, `merge_from`) commit once after all mutations — one fsync per batch instead of one per row.
 
 ### Auto-index after import
 
