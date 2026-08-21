@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+# 77 is the floor: `license` as a bare SPDX expression and `license-files` are
+# PEP 639 keys, which older setuptools does not understand.
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +10,7 @@ version = "0.2.0"
 description = "Lightweight MCP Server for RAG-based skill retrieval"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 authors = [
     {name = "Zhan Cheng", email = "zcheng256@gmail.com"},
