@@ -450,7 +450,7 @@ class TestDirectoryImporter:
         importer = DirectoryImporter()
         importer.import_skills(tmp_path, store)
         skills = store.get_all()
-        assert skills[0].category == "my-skill"  # parent dir name of SKILL.md
+        assert skills[0].category == "my-category"  # grouping folder, not the skill's own dir
         store.close()
 
     def test_nested_skill_dirs(self, tmp_path):

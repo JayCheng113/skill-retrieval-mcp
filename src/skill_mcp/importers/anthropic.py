@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
-from skill_mcp.importers.frontmatter import split_frontmatter
+from skill_mcp.importers.frontmatter import parse_frontmatter, split_frontmatter
 from skill_mcp.schema import Skill, SkillSource
 from skill_mcp.store import ImportStats, SkillStore
 
@@ -35,8 +33,8 @@ class AnthropicImporter:
         if frontmatter is None:
             return None
 
-        meta = yaml.safe_load(frontmatter)
-        if not isinstance(meta, dict):
+        meta = parse_frontmatter(frontmatter)
+        if not meta:
             return None
 
         name = meta.get("name", path.stem)
