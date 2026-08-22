@@ -142,3 +142,14 @@ def test_directory_category_is_grouping_folder_not_skill_name(tmp_path):
     by_name = {s.name: s for s in store.get_all()}
     assert by_name["flat-skill"].category == ""
     assert by_name["gke-thing"].category == "cloud"
+
+
+def test_frontmatter_category_outranks_directory_inference(tmp_path):
+    from skill_mcp.importers.directory import DirectoryImporter
+    from skill_mcp.store import SkillStore
+
+    root = tmp_path / "skills"
+    _write_plain_skill(root, "tagged", "name: tagged\ndescription: has explicit category\ncategory: design\n")
+    store = SkillStore(tmp_path / "s.jsonl")
+    DirectoryImporter().import_skills(root, store)
+    assert store.get_all()[0].category == "design"

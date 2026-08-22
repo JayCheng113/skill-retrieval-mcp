@@ -49,12 +49,16 @@ class DirectoryImporter:
         elif not isinstance(tags, list):
             tags = []
 
+        # An explicit frontmatter category outranks directory inference —
+        # flat skill trees (the common layout) have no grouping folder to infer from.
+        category = str(meta.get("category") or "").strip() or self._category(path, root)
+
         return Skill(
             name=name,
             description=description,
             instructions=body.strip(),
             source=SkillSource.COMMUNITY,
-            category=self._category(path, root),
+            category=category,
             tags=[str(t) for t in tags],
         )
 
