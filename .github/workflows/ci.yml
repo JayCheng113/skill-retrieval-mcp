@@ -57,11 +57,26 @@ jobs:
 
       - name: Install the wheel into a clean environment
         run: |
+          set -o pipefail
           python -m venv /tmp/e2e
           # sentence-transformers pulls torch, and the default wheel carries the
           # whole CUDA runtime for a job that will only ever run on CPU.
-          /tmp/e2e/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
-          /tmp/e2e/bin/pip install "$(ls dist/*.whl)[local]"
+          /tmp/e2e/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu 2>&1 | tee /tmp/pip-torch.log
+          /tmp/e2e/bin/pip install "$(ls dist/*.whl)[local]" 2>&1 | tee /tmp/pip-wheel.log
+
+      # Run logs are admin-only over the REST API, so an install failure here is
+      # invisible to anything driving CI from a script. Annotations are not.
+      - name: Surface the install failure
+        if: failure()
+        run: |
+          echo "::error::env: $(/tmp/e2e/bin/pip -V 2>&1 | head -c 200)"
+          echo "::error::disk: $(df -h / | tail -1)"
+          for f in /tmp/pip-torch.log /tmp/pip-wheel.log; do
+            [ -f "$f" ] || continue
+            tail -n 3 "$f" | while IFS= read -r line; do
+              echo "::error::$(basename "$f"): ${line:0:400}"
+            done
+          done
 
       - name: Build a store and index with a real embedding model
         run: |
