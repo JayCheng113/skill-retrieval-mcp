@@ -57,7 +57,7 @@ Both searches above are real output from the shipped corpus, not an illustration
 
 | | Installing skills manually | skill-retrieval-mcp |
 |---|---|---|
-| **Scale** | Dozens, if you're diligent | 373 across 7 upstream repos |
+| **Scale** | Dozens, if you're diligent | 374 across 8 upstream repos |
 | **Discovery** | You find and install each one | Agent searches by need |
 | **Selection** | You pick upfront | Agent picks per-task |
 | **Search** | Name matching on descriptions | Semantic, < 5ms, local FAISS |
@@ -94,7 +94,7 @@ Done. Your agent now searches the corpus on demand.
 
 ## What's In the Knowledge Base
 
-373 skills, collected from seven repositories whose licences were read before anything was imported:
+374 skills, collected from eight repositories whose licences were read before anything was imported:
 
 | Repository | Skills | Licence |
 |------------|--------|---------|
@@ -105,6 +105,7 @@ Done. Your agent now searches the corpus on demand.
 | [anthropics/skills](https://github.com/anthropics/skills) | 20 | Apache-2.0 |
 | [obra/superpowers](https://github.com/obra/superpowers) | 14 | MIT |
 | [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills) | 5 | MIT |
+| [Agents365-ai/drawio-skill](https://github.com/Agents365-ai/drawio-skill) | 1 | MIT |
 
 Each skill is a structured best-practice guide — not a one-liner, but a step-by-step how-to with code examples, common pitfalls, and recommendations. The median one runs about 9,600 characters.
 

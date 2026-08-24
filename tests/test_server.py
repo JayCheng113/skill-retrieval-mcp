@@ -65,6 +65,39 @@ def test_get_skill():
     store.close()
 
 
+def test_get_skill_hands_the_agent_its_licence_and_upstream_url():
+    """A returned guide is a redistributed copy, so its attribution must ship with it.
+
+    The importer vets a licence per row precisely so that the corpus can be
+    republished; dropping that on the way out leaves the agent quoting MIT-
+    licensed text with no notice. The upstream URL is also the agent's only
+    route to files a guide references but that the corpus does not store.
+    """
+    store = SkillStore()
+    skill = Skill(
+        name="drawio-diagrams",
+        description="Author draw.io diagrams",
+        instructions="Run scripts/c4.py to generate the container view.",
+        source=SkillSource.COMMUNITY,
+        metadata={
+            "repo": "Agents365-ai/drawio-skill",
+            "repo_url": "https://github.com/Agents365-ai/drawio-skill",
+            "url": "https://github.com/Agents365-ai/drawio-skill/blob/main/skills/x/SKILL.md",
+            "license": "MIT",
+            "path": "skills/x/SKILL.md",
+        },
+    )
+    store.add_skills([skill])
+    srv._store = store
+
+    data = json.loads(srv._handle_get_skill({"skill_id": skill.id})[0].text)
+
+    assert data["upstream"]["license"] == "MIT"
+    assert data["upstream"]["url"].endswith("SKILL.md")
+    assert data["upstream"]["repo"] == "Agents365-ai/drawio-skill"
+    store.close()
+
+
 def test_get_skill_not_found():
     store, _ = _setup_server()
     result = srv._handle_get_skill({"skill_id": "nonexistent"})
@@ -170,7 +203,7 @@ class TestToolDescriptions:
         assert "get_skill" in desc
 
     def test_list_categories_admits_its_coverage_is_partial(self, tools):
-        """Only 147 of 373 skills carry a category, and the entire computational
+        """Only 147 of 374 skills carry a category, and the entire computational
         science set carries none. An agent that reads these counts as the shape
         of the library concludes it is a cloud-only tool, so the description has
         to say the counts are incomplete and send it to search instead."""

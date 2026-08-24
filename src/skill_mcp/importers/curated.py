@@ -39,6 +39,7 @@ CURATED_REPOS: dict[str, CuratedRepo] = {
         CuratedRepo("addyosmani/agent-skills", "MIT", SkillSource.COMMUNITY),
         CuratedRepo("obra/superpowers", "MIT", SkillSource.COMMUNITY),
         CuratedRepo("kepano/obsidian-skills", "MIT", SkillSource.COMMUNITY),
+        CuratedRepo("Agents365-ai/drawio-skill", "MIT", SkillSource.COMMUNITY),
     )
 }
 

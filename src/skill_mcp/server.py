@@ -36,7 +36,8 @@ server = _FastServer(
         "Mobile Ads APIs) and on computational science (single-cell and bulk "
         "RNA-seq, cheminformatics, structural biology, statistics, scientific "
         "writing and figures), with smaller sets on agent engineering practice, "
-        "frontend and API design, and Obsidian. It covers little else: AWS, Azure, "
+        "frontend and API design, Obsidian, and one deep guide to draw.io "
+        "diagramming. It covers little else: AWS, Azure, "
         "Rust, iOS, self-hosted databases and most web infrastructure are absent. "
         "Workflow: search_skills (semantic) or keyword_search (exact terms) → "
         "read the returned descriptions → get_skill for the full guide. "
@@ -127,7 +128,9 @@ async def search_skills(
         "Always call this after search_skills or keyword_search "
         "when you find a relevant skill — the search results contain "
         "summaries only, this returns the complete guide with code examples "
-        "and best practices."
+        "and best practices. The `upstream` field gives the licence and the "
+        "source file on GitHub: fetch that repository when a guide refers to "
+        "scripts or reference files it ships alongside, which are not stored here."
     ),
     structured_output=False,
 )
@@ -233,6 +236,16 @@ def _handle_get_skill(arguments: dict) -> list[TextContent]:
         "tags": skill.tags,
         "source": skill.source.value,
     }
+    # Every row was licence-vetted at import time; the guide is a redistributed
+    # copy, so the attribution has to travel with it. It is also the only way an
+    # agent can reach files a skill references but that we do not ship.
+    provenance = {
+        key: skill.metadata[key]
+        for key in ("repo", "repo_url", "url", "license", "declared_license")
+        if skill.metadata.get(key)
+    }
+    if provenance:
+        output["upstream"] = provenance
     return [TextContent(type="text", text=json.dumps(output, ensure_ascii=False))]
 
 

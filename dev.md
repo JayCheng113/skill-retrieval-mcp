@@ -123,7 +123,7 @@ Higher priority replaces lower. Equal or lower is silently skipped. The `dedup` 
 
 Every imported row therefore carries `metadata["license"]`, `repo`, `repo_url` and `url`. When a skill declares its own narrower licence in frontmatter (K-Dense ships BSD-3-Clause files under an MIT repo), it is kept verbatim as `declared_license` beside the repo licence rather than reconciled.
 
-None of the seven repos use frontmatter `tags`, so `tags` is empty for all 373 curated rows. It stays in the schema because directory imports of your own skills do populate it.
+None of the eight repos use frontmatter `tags`, so `tags` is empty for all 374 curated rows. It stays in the schema because directory imports of your own skills do populate it.
 
 ### Commit strategy: batch, not per-row
 
