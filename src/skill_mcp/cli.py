@@ -142,6 +142,13 @@ def _register_openclaw(mcp_entry: dict) -> None:
     Unlike Hermes, `openclaw mcp add` exits 1 on failure, so its exit code is a
     real verdict and no read-back is needed — which is just as well, since its
     config is JSON5 and `json.load` cannot parse it.
+
+    Two more of its behaviours are load-bearing for the order `init` does
+    things in. It connects to the server and saves nothing if that fails, so we
+    have to be startable at this point, before anything has been imported. And
+    it refuses to overwrite an existing entry, so re-running `init` reports a
+    failure whose real meaning is that we were already registered — OpenClaw
+    prints that reason itself, on the terminal it shares with us.
     """
     _register_via_cli(
         "openclaw",
@@ -176,11 +183,13 @@ def _register_via_cli(binary: str, args: list[str], label: str) -> bool:
 def _register_hermes(mcp_entry: dict) -> None:
     """Register with Hermes, then confirm it actually landed.
 
-    `hermes mcp add` has no non-interactive flag: it prompts via bare input()
-    after probing, and on EOF or a declined prompt it prints "Cancelled." and
-    exits 0 without saving. Its exit code therefore cannot distinguish a write
-    from a no-op, so the config is read back instead. `--args` is
-    argparse.REMAINDER, so it swallows the rest of the line and must come last.
+    `hermes mcp add` has no non-interactive flag. It exits 0 on every outcome:
+    the prompt it shows us is a bare input() whose EOF path prints "Cancelled."
+    and saves nothing, while the prompts on its other branches return their
+    default on EOF and one of those defaults is yes. So the exit code cannot
+    distinguish a write from a no-op in either direction, and the config is read
+    back instead. `--args` is argparse.REMAINDER, which swallows the rest of the
+    line without complaining, so it must come last.
     """
     name = "skill-retrieval"
     if not _register_via_cli(
@@ -192,28 +201,75 @@ def _register_hermes(mcp_entry: dict) -> None:
 
     home = Path(os.environ.get("HERMES_HOME") or _default_hermes_home()).expanduser()
     config = home / "config.yaml"
-    if _yaml_has_server(config, name):
+    state = _hermes_server_state(config, name)
+    if state == "enabled":
         click.echo(f"  Registered in {config}")
+    elif state == "disabled":
+        command = " ".join([mcp_entry["command"], *mcp_entry["args"]])
+        click.echo(
+            f"  Hermes saved {name} to {config} but left it disabled, which is what "
+            f"it does when it cannot reach `{command}`. Hermes skips disabled "
+            f"servers, so fix that and run: hermes mcp test {name}"
+        )
     else:
         click.echo(f"  Hermes reported no error but {name} is not in {config} — not registered")
 
 
 def _default_hermes_home() -> str:
+    # Mirrors hermes_constants._get_platform_default_hermes_home().
     if os.name == "nt":
-        return str(Path(os.environ.get("LOCALAPPDATA", "~")) / "hermes")
+        local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        base = Path(local_appdata) if local_appdata else Path.home() / "AppData" / "Local"
+        return str(base / "hermes")
     return "~/.hermes"
 
 
-def _yaml_has_server(config: Path, name: str) -> bool:
+def _hermes_server_state(config: Path, name: str) -> str:
+    """Return "enabled", "disabled" or "missing" for a server in Hermes' config.
+
+    Disabled is its own answer because Hermes writes exactly that when its probe
+    of the server fails and the user saves anyway, and it then filters disabled
+    servers out of what the agent sees. Reporting one as registered would be a
+    lie the user only discovers when the tools never show up.
+    """
     if not config.exists():
-        return False
+        return "missing"
     import yaml
 
     try:
-        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(config.read_text(encoding="utf-8"))
     except yaml.YAMLError:
-        return False
-    return name in (data.get("mcp_servers") or {})
+        return "missing"
+    if not isinstance(data, dict):
+        return "missing"
+    servers = data.get("mcp_servers")
+    if not isinstance(servers, dict):
+        return "missing"
+    entry = servers.get(name)
+    if not isinstance(entry, dict):
+        return "missing"
+    return "enabled" if _hermes_enabled_flag(entry.get("enabled")) else "disabled"
+
+
+def _hermes_enabled_flag(value) -> bool:
+    """Mirror of hermes_cli.tools_config._parse_enabled_flag.
+
+    Whether a server counts as enabled is Hermes' decision, not ours, and the
+    only way to report it correctly is to answer the way it would. Note that
+    anything it does not recognise means enabled, so a stricter reading here
+    would tell users to go fix a server that Hermes is happily running.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "on"}:
+            return True
+        if lowered in {"false", "0", "no", "off"}:
+            return False
+    return True
 
 
 def _print_dsh_snippet(mcp_entry: dict) -> None:
@@ -223,20 +279,27 @@ def _print_dsh_snippet(mcp_entry: dict) -> None:
     `plugin`. Editing the overlay here is not worth it: the format is a
     developer preview, and shipped examples carry !!js tags that safe_load
     refuses and an unsafe load would execute.
+
+    The `insert:` wrapper is the whole point of the snippet. A patch file is a
+    list of operations, not a list of rows, and an operation carrying an `id`
+    but no `insert` means "override the row that already has this id". Adding a
+    new server without it resolves to a patch against an id nothing defines,
+    which applyEntryPatches answers with one stderr warning and no tools.
     """
     dsh_home = Path(os.environ.get("DSH_HOME") or "~/.dsh").expanduser()
     if not dsh_home.exists():
         return
     click.echo(f"\nDeepSeek Harness detected at {dsh_home}, but it has no `mcp add` command.")
-    click.echo(f"Add this row to {dsh_home / 'cordis.patch.yml'} yourself:")
+    click.echo(f"Add this to {dsh_home / 'cordis.patch.yml'} yourself:")
     click.echo(
-        "\n  - id: skill-retrieval\n"
-        "    name: '@deepseek-ai/dsh-mcp-client'\n"
-        "    config:\n"
-        "      transport: 'stdio'\n"
-        "      serverName: 'skill-retrieval'\n"
-        f"      command: '{mcp_entry['command']}'\n"
-        f"      args: {json.dumps(mcp_entry['args'])}\n"
+        "\n  - insert:\n"
+        "      - id: skill-retrieval\n"
+        "        name: '@deepseek-ai/dsh-mcp-client'\n"
+        "        config:\n"
+        "          transport: 'stdio'\n"
+        "          serverName: 'skill-retrieval'\n"
+        f"          command: '{mcp_entry['command']}'\n"
+        f"          args: {json.dumps(mcp_entry['args'])}\n"
     )
 
 

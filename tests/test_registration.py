@@ -10,6 +10,7 @@ would pass any shape-based test while silently eating the user's comments.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 
 import pytest
@@ -122,6 +123,95 @@ def test_hermes_reports_registered_only_when_the_key_landed(tmp_path, monkeypatc
     assert argv[argv.index("--args") :] == ["--args", "serve", "--transport", "stdio"]
 
 
+def test_hermes_saved_but_disabled_is_not_reported_as_registered(tmp_path, monkeypatch, capsys):
+    """When Hermes cannot reach the server it offers to save the entry anyway,
+    and what it writes is `enabled: false`. Its agent then filters disabled
+    servers out, so the key being present says nothing about the tools being
+    reachable — the one failure the user would otherwise never be told about."""
+    home = tmp_path / "hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+
+    def land_it_disabled():
+        (home / "config.yaml").write_text(
+            "mcp_servers:\n"
+            "  skill-retrieval:\n"
+            "    command: skill-mcp\n"
+            "    args: [serve]\n"
+            "    enabled: false\n",
+            encoding="utf-8",
+        )
+
+    _stub_cli(monkeypatch, side_effect=land_it_disabled)
+
+    cli._register_hermes({"command": "skill-mcp", "args": ["serve"]})
+
+    out = capsys.readouterr().out
+    assert "Registered in" not in out
+    assert "disabled" in out
+    # The user has to be able to act on it, which means knowing what to re-run.
+    assert "hermes mcp test skill-retrieval" in out
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected"),
+    [
+        # Copied from hermes_cli.tools_config._parse_enabled_flag, which is the
+        # function that decides whether the agent ever sees this server.
+        ("false", "disabled"),
+        ("off", "disabled"),
+        ("no", "disabled"),
+        ("0", "disabled"),
+        ("true", "enabled"),
+        ("on", "enabled"),
+        ("yes", "enabled"),
+        ("  FALSE  ", "disabled"),
+        # Everything it does not recognise means enabled, so reading these as
+        # disabled would tell the user to repair a server that already works.
+        ("maybe", "enabled"),
+        ("", "enabled"),
+        (None, "enabled"),
+    ],
+)
+def test_enabled_is_read_the_way_hermes_reads_it(tmp_path, flag, expected):
+    config = tmp_path / "config.yaml"
+    value = "null" if flag is None else json.dumps(flag)
+    config.write_text(
+        f"mcp_servers:\n  skill-retrieval:\n    command: skill-mcp\n    enabled: {value}\n",
+        encoding="utf-8",
+    )
+
+    assert cli._hermes_server_state(config, "skill-retrieval") == expected
+
+
+@pytest.mark.parametrize(
+    "config_text",
+    [
+        "mcp_servers: not-a-dict\n",
+        "mcp_servers:\n  - skill-retrieval\n",
+        "mcp_servers:\n  skill-retrieval: null\n",
+        "just a string\n",
+        "mcp_servers: {skill-retrieval: {command: skill-mcp}\n",  # unbalanced brace
+    ],
+)
+def test_a_hand_broken_hermes_config_cannot_abort_init(tmp_path, monkeypatch, capsys, config_text):
+    """This read-back exists because Hermes' config is hand-written, so it has
+    to assume the file is shaped however a human left it.
+
+    Registration is one step of `skill-mcp init`; raising here would take the
+    whole command down over a file we only ever read.
+    """
+    home = tmp_path / "hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    (home / "config.yaml").write_text(config_text, encoding="utf-8")
+    _stub_cli(monkeypatch)
+
+    cli._register_hermes({"command": "skill-mcp", "args": ["serve"]})
+
+    assert "Registered in" not in capsys.readouterr().out
+
+
 def test_deepseek_prints_a_snippet_and_edits_nothing(tmp_path, monkeypatch, capsys):
     """DeepSeek Harness has no `mcp add`, and its overlay format is a developer
     preview whose examples carry executable !!js tags."""
@@ -135,6 +225,43 @@ def test_deepseek_prints_a_snippet_and_edits_nothing(tmp_path, monkeypatch, caps
     assert "cordis.patch.yml" in out
     assert "@deepseek-ai/dsh-mcp-client" in out
     assert list(dsh.iterdir()) == []
+
+
+def test_deepseek_snippet_adds_a_row_rather_than_patching_an_absent_one(
+    tmp_path, monkeypatch, capsys
+):
+    """A cordis.patch.yml holds operations, not rows.
+
+    An operation with an `id` and no `insert` means "override the row that
+    already has this id", so pasting a bare row registers nothing: the id
+    matches no entry, and DSH answers that with a warning on stderr rather than
+    an error. The user would be told to do something that silently does not
+    work, so the snippet is checked here by parsing it and asking which
+    operation it is — the same question DSH's patch algorithm asks.
+    """
+    import yaml
+
+    dsh = tmp_path / "dsh"
+    dsh.mkdir()
+    monkeypatch.setenv("DSH_HOME", str(dsh))
+
+    cli._print_dsh_snippet({"command": "skill-mcp", "args": ["serve", "--transport", "stdio"]})
+
+    snippet = capsys.readouterr().out.split("cordis.patch.yml", 1)[1].split("\n", 1)[1]
+    ops = yaml.safe_load(snippet)
+    assert isinstance(ops, list), "a patch file is a top-level list of operations"
+    (op,) = ops
+    assert "insert" in op, f"this is an id-targeted override, not an insert: {op}"
+
+    (row,) = op["insert"]
+    assert row["name"] == "@deepseek-ai/dsh-mcp-client"
+    config = row["config"]
+    assert config["transport"] == "stdio"
+    assert config["command"] == "skill-mcp"
+    assert config["args"] == ["serve", "--transport", "stdio"]
+    # DSH builds tool names as mcp__<serverName>__<tool> and rejects anything
+    # outside this shape, so a name it will not accept yields no tools at all.
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,32}", config["serverName"])
 
 
 def test_deepseek_snippet_is_silent_when_not_installed(tmp_path, monkeypatch, capsys):

@@ -305,29 +305,65 @@ so we shell out and never parse their file. DeepSeek Harness gets neither: its
 entire command surface is `--profile`/`--patch`/`--dump-config` plus `web` and
 `plugin`, registration is a Cordis patch overlay whose format is an explicit
 developer preview, and its shipped examples carry `!!js` tags that `safe_load`
-refuses and an unsafe load would execute. `init` prints the row instead.
+refuses and an unsafe load would execute. `init` prints the patch instead.
 
 Two upstream details are load-bearing and were read out of their parsers, not
 their docs:
 
 - Hermes declares `--args` as `argparse.REMAINDER`, so it swallows everything
-  after it and must come last. More importantly it has **no non-interactive
-  flag**: it prompts with a bare `input()` after probing, and on EOF or a
-  declined prompt it prints `Cancelled.` and **exits 0 without saving**. Its
-  exit code therefore cannot distinguish a write from a no-op, so
-  `_register_hermes` reads `config.yaml` back and only claims success if the
-  key is actually there. Reading is safe; only writing destroys comments.
+  after it and must come last. Getting that wrong is **silent**: the run above
+  parses `--command` as `None` and reports no error. It also has **no
+  non-interactive flag**, and it exits 0 on every outcome. The prompt on our
+  path is a bare `input()` whose EOF branch prints `Cancelled.` and saves
+  nothing, while its other prompts go through a helper that returns *its
+  default* on EOF — and one of those defaults is yes. So the exit code cannot
+  distinguish a write from a no-op in either direction, and `_register_hermes`
+  reads `config.yaml` back instead. Reading is safe; only writing destroys
+  comments.
 - OpenClaw takes `--arg`/`--env`/`--header` as repeated flags, not lists. It is
   `createOnly`, so re-running against an existing entry fails rather than
   overwriting, and it connects to the server to probe it before saving unless
   given `--no-probe`.
 
-Caveat worth keeping in view: **none of these three is installed on any machine
-this has been developed on**, so the delegation is verified against upstream
-source and unit tests with a faked `subprocess.run`, never against the real
-binaries. `tests/test_registration.py` pins the part that would hurt most — that
-we hand OpenClaw its own arguments rather than rewriting its commented config,
-and that a Hermes no-op is never reported as a registration.
+#### What the real parsers said
+
+The three agents cannot be installed here — PyPI and npm are both blocked on
+this network — so "verified" was raised from *read* to *executed*: upstream was
+cloned over SSH and our exact argv run through their real code. Anchors:
+`NousResearch/hermes-agent` @ `ec5e369f`, `openclaw/openclaw` @ `1bca8251`,
+`deepseek-ai/deepseek-harness` @ `b150a551`, `tj/commander.js` @ `v15.0.0`.
+
+That confirmed the `--arg`-per-argument and `--args`-must-be-last claims above,
+and corrected or found three things:
+
+- **Hermes can save a server disabled.** When its probe fails and the user
+  saves anyway, it writes the entry with `enabled: false`, and its agent then
+  filters disabled servers out of what the model sees. A read-back that only
+  asked *is the key present* answered yes — a false positive in the exact
+  mechanism that exists to prevent false positives. `_hermes_server_state` now
+  answers `enabled` / `disabled` / `missing`, and the disabled case prints what
+  to re-run.
+- **OpenClaw probes before it saves**, and `init` offers registration *before*
+  anything has been imported. That ordering only works because startup degrades
+  on a missing index instead of failing, which is now pinned by
+  `test_startup_survives_the_state_init_leaves_behind` rather than left to luck.
+  Measured handshake on the 374-skill corpus is 1.4s against OpenClaw's 5s
+  probe budget, and 1.1s with no index at all; the margin exists because the
+  embedding model loads lazily on first search, not at startup.
+- **The DeepSeek snippet did not register anything.** A `cordis.patch.yml` is a
+  list of *operations*, not of rows. An operation carrying an `id` and no
+  `insert` means "override the row that already has this id", so the bare row
+  we used to print resolved to a patch against an id nothing defines —
+  `applyEntryPatches` answers that with one stderr warning and continues. The
+  snippet now emits the `insert:` wrapper, and the test parses it back and asks
+  which operation it is rather than matching the text.
+
+What still cannot be verified: that any of these three actually loads our tools
+once registered. `tests/test_registration.py` uses a faked `subprocess.run`, so
+it pins our side of the contract — that we hand OpenClaw its own arguments
+rather than rewriting its commented config, that a Hermes no-op or disabled
+entry is never reported as a registration, and that the DeepSeek snippet is an
+insert — but the binaries have never run here.
 
 ## Extension Points
 
@@ -404,7 +440,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 166 tests, ~5s
+pytest tests/ -v    # 169 tests, ~6s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
