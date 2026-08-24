@@ -11,13 +11,10 @@ from typing import Annotated
 
 from pydantic import Field
 
-try:  # mcp >= 2.0
-    from mcp.server import MCPServer as _FastServer
-except ImportError:  # mcp 1.x
-    from mcp.server.fastmcp import FastMCP as _FastServer
-
+from mcp.server import MCPServer
 from mcp.types import TextContent
 
+from skill_mcp import __version__
 from skill_mcp.config import Config
 from skill_mcp.embeddings import EmbeddingModel
 from skill_mcp.index import SkillIndex
@@ -26,8 +23,9 @@ from skill_mcp.store import SkillStore
 
 logger = logging.getLogger("skill_mcp")
 
-server = _FastServer(
+server = MCPServer(
     "skill-retrieval",
+    version=__version__,
     instructions=(
         "A local library of curated skills — each one a procedural guide written "
         "by the tool's own maintainers, not a generated summary. "
@@ -87,10 +85,10 @@ def _get_embedding() -> EmbeddingModel | None:
 def _dispatch(name: str, handler, arguments: dict) -> str:
     """Run a handler, log timing, and unwrap it to the JSON text payload.
 
-    The tool functions below are ``async`` on purpose: mcp 2.x dispatches sync
-    tool callables to a worker thread, and the SQLite connection in SkillStore
-    is bound to the thread that opened it. Staying on the event loop keeps every
-    handler on the startup thread under both mcp 1.x and 2.x.
+    The tool functions below are ``async`` on purpose: mcp dispatches sync tool
+    callables to a worker thread, and the SQLite connection in SkillStore is
+    bound to the thread that opened it. Staying on the event loop keeps every
+    handler on the startup thread.
     """
     logger.debug("tool_call: %s args=%s", name, arguments)
     t0 = time.perf_counter()

@@ -34,15 +34,38 @@
 
 ## mcp Version Support
 
-`server.py` builds on the high-level server API, which ships under two names:
-`FastMCP` on mcp 1.x and `MCPServer` on mcp 2.x. The `.tool()` signature is the
-same on both, so a try/except import is the whole shim.
+The declared floor is `mcp>=2.0`, which is narrower than it looks: mcp 1.x also
+*imports* and *serves*, but semantic search kills the process there.
 
-The declared floor is `mcp>=1.14`. Earlier releases crash in
-`Tool.from_function` on `Annotated[...]` parameters — they call `issubclass()`
-on an annotation that is not a class. CI runs a dedicated `test-mcp-floor` leg
-pinned to `mcp==1.14.0` so the FastMCP branch of the shim stays covered; the
-main matrix resolves to latest and covers the `MCPServer` branch.
+The high-level server API ships under two names — `FastMCP` on mcp 1.x,
+`MCPServer` on 2.x — with an identical `.tool()` signature, so `server.py`
+carried a two-line try/except shim and declared `mcp>=1.14` (1.13 and earlier
+crash in `Tool.from_function` on `Annotated[...]` parameters: they call
+`issubclass()` on an annotation that is not a class). That floor was never true.
+Measured in one venv, one corpus, one model, changing only the mcp version:
+
+| | mcp 2.0 | mcp 1.14 |
+|---|---|---|
+| handshake, `list_tools` | pass | pass |
+| `keyword_search` over stdio | pass, 0.9ms | pass, 0.9ms |
+| `skill-mcp search` (loads the model, no MCP) | pass | pass, identical scores |
+| `search_skills` over stdio | pass, 0.664 | **server dies**, client sees `Connection closed` |
+
+So the model is fine and the server is fine; the one path that dies is *loading
+the embedding model inside an mcp 1.x stdio server* — which is the reason this
+product exists. The death is silent: no traceback on the server's stderr, and
+the startup warm-up never logs `embedding: loaded` even after 45s idle.
+Removing the background warm entirely does not fix it. **The root cause was
+never found, only isolated**, which is why the floor moved rather than a
+workaround landing.
+
+CI used to run a `test-mcp-floor` leg pinned to `mcp==1.14.0` and it was green
+the whole time, because the suite uses the mock embedding backend and dispatches
+in-process — it never spawns a subprocess and never loads a real model. That leg
+is gone along with the shim. The gap it left is the same one that let 0.2.0 ship
+with a server that could not start: **nothing in CI exercises the built
+artifact end-to-end over real stdio.** Until something does, run
+`skill-mcp serve` from a clean install of the wheel before tagging a release.
 
 ## Module Responsibilities
 

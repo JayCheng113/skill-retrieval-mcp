@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skill-retrieval-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Lightweight MCP Server for RAG-based skill retrieval"
 readme = "README.md"
 license = "MIT"
@@ -26,12 +26,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    # 1.14 is the floor: earlier releases crash in Tool.from_function on
-    # Annotated[...] parameters (issubclass on a non-class annotation).
-    # There is no upper cap: the server uses the FastMCP-style decorator API,
-    # which mcp 2.x kept. The suite and the end-to-end stdio client both run
-    # green on 2.0.
-    "mcp>=1.14",
+    # 2.0 is the floor because semantic search does not survive below it: on
+    # mcp 1.14 the stdio server dies without a traceback the first time
+    # search_skills loads the embedding model, while keyword_search and the
+    # non-MCP `skill-mcp search` path both work. Root cause never found.
+    "mcp>=2.0",
     "pydantic>=2.11",
     "faiss-cpu>=1.8",
     "numpy>=1.26",

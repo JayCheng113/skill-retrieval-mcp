@@ -29,25 +29,6 @@ jobs:
       - name: Test
         run: pytest tests/ -v --tb=short
 
-  test-mcp-floor:
-    name: test (mcp 1.14 floor)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # The matrix above resolves mcp to latest (2.x, the MCPServer branch).
-      # This leg exercises the declared floor, which is the FastMCP branch of
-      # the compatibility shim in server.py.
-      - name: Install with the oldest supported mcp
-        run: pip install -e ".[dev]" "mcp==1.14.0"
-
-      - name: Test
-        run: pytest tests/ -v --tb=short
-
   lint-format:
     runs-on: ubuntu-latest
     steps:
