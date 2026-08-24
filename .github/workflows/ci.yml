@@ -59,6 +59,11 @@ jobs:
         run: |
           set -o pipefail
           python -m venv /tmp/e2e
+          # The pip bundled inside a 3.10 venv is 23.0.1, which discards any wheel
+          # whose metadata spells its own name differently from the request
+          # (`Jinja2` vs `jinja2`), falls back to the sdist and then fails to build
+          # it. Name normalisation was fixed upstream years ago.
+          /tmp/e2e/bin/pip install --upgrade pip
           # sentence-transformers pulls torch, and the default wheel carries the
           # whole CUDA runtime for a job that will only ever run on CPU.
           /tmp/e2e/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu 2>&1 | tee /tmp/pip-torch.log
