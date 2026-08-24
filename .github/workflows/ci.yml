@@ -69,14 +69,21 @@ jobs:
       - name: Surface the install failure
         if: failure()
         run: |
-          echo "::error::env: $(/tmp/e2e/bin/pip -V 2>&1 | head -c 200)"
-          echo "::error::disk: $(df -h / | tail -1)"
-          for f in /tmp/pip-torch.log /tmp/pip-wheel.log; do
-            [ -f "$f" ] || continue
-            tail -n 3 "$f" | while IFS= read -r line; do
-              echo "::error::$(basename "$f"): ${line:0:400}"
-            done
-          done
+          python3 - <<'PY'
+          import os, pathlib
+          out = [os.popen("/tmp/e2e/bin/pip -V").read().strip(),
+                 os.popen("df -h /").read().strip().splitlines()[-1]]
+          for name in ("pip-torch.log", "pip-wheel.log"):
+              p = pathlib.Path("/tmp") / name
+              if not p.exists():
+                  out.append(f"--- {name}: not written ---")
+                  continue
+              tail = p.read_text(errors="replace").splitlines()[-60:]
+              out.append(f"--- {name} (last {len(tail)} lines) ---")
+              out.extend(tail)
+          msg = "\n".join(out).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error::{msg}")
+          PY
 
       - name: Build a store and index with a real embedding model
         run: |
