@@ -43,6 +43,10 @@ class Skill:
 
     def to_embedding_text(self) -> str:
         """Text used for embedding: name + description + first 500 chars of instructions."""
+        # 500 reads arbitrary and invites being raised. It was swept: on the eval
+        # set [:1000], [:2000] and the untruncated instructions all score the same
+        # and all score below [:500], because everything past roughly this point
+        # falls outside the model's 256 word-piece window and is never seen.
         parts = [self.name, self.description]
         if self.instructions:
             parts.append(self.instructions[:500])

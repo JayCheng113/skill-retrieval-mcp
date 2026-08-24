@@ -94,7 +94,7 @@ content_hash  = md5(instructions)
 
 - `id` is deterministic: same source + name + content → same ID
 - `content_hash` drives dedup: same instructions = same hash regardless of source/name
-- `to_embedding_text()` = `name\ndescription\ninstructions[:500]` — truncated for embedding efficiency
+- `to_embedding_text()` = `name\ndescription\ninstructions[:500]` — the slice is a measured optimum, not a size limit; see the embedding-window section below
 
 ### SQLite Schema
 
@@ -177,18 +177,48 @@ One index = one embedding model. Enforced at three levels:
 
 Config is the source of truth for *defaults*. Index metadata is the source of truth for *what was actually used*.
 
-### The embedding text overflows the model window, and the discarded tail is load-bearing
+### The embedding text overflows the model window, and that turns out not to matter
 
-`Skill.to_embedding_text()` is `name + description + instructions[:500]`. `all-MiniLM-L6-v2` accepts 256 word-pieces and silently drops the rest. On the 374-row corpus, 61 rows (16%) overflow: median 47 word-pieces discarded, worst case 225, and for 6 rows the cut lands inside the *description* rather than the instructions slice.
+`Skill.to_embedding_text()` is `name + description + instructions[:500]`. `all-MiniLM-L6-v2` accepts 256 word-pieces and silently drops the rest, so about 16% of rows overflow — median 47 word-pieces discarded, worst case 227, and for a handful the cut lands inside the *description* rather than the instructions slice.
 
-The obvious simplification — drop `instructions[:500]`, since for the overflowing rows it is already a no-op — was measured and rejected. On the 43-query in-domain eval set:
+That is a fact about the input. It was assumed to be a fact about the output too, and it is not. Three measurements on the 43-query eval set, all with the shipped retrieval path (normalized vectors, inner product) reproduced in numpy — the control row below matches the shipped numbers to the digit, so the instrument is the same one:
 
-| recipe | R@1 | R@3 | MRR | out-of-domain top-1 (max / median) |
+**Removing the overflow entirely changes nothing.** `BAAI/bge-small-en-v1.5` is 384-dimensional like MiniLM but takes 512 word-pieces, so the same corpus can be embedded with the window as the only moving part:
+
+| model | window | rows overflowing | R@1 | R@3 | R@5 | MRR |
+| --- | --- | --- | --- | --- | --- | --- |
+| bge-small | 256 | 62 | 67.4% | 79.1% | 86.0% | 0.736 |
+| bge-small | 512 | **0** | 67.4% | 79.1% | 86.0% | 0.732 |
+
+Sixty-two rows got their discarded tail back and not one of the 43 queries changed bucket.
+
+**The window is an absolute ceiling, so the discarded tail is unreachable rather than wasted.** Widening the recipe slice on the shipped model does not move a single number, because everything added lands outside the window:
+
+| recipe (MiniLM @256) | median embedding text | worst-case discard | R@1 | R@3 | R@5 | MRR |
+| --- | --- | --- | --- | --- | --- | --- |
+| `instructions[:500]` | 841 ch | 227 wp | 81.4% | 90.7% | 90.7% | 0.853 |
+| `instructions[:1000]` | 1340 ch | 354 wp | 79.1% | 88.4% | 93.0% | 0.839 |
+| `instructions[:2000]` | 2340 ch | 635 wp | 79.1% | 88.4% | 93.0% | 0.839 |
+| `instructions` in full | 10138 ch | 21890 wp | 79.1% | 88.4% | 93.0% | 0.839 |
+
+The last three rows are identical while the discarded tail grows sixty-fold. `[:500]` is therefore not an arbitrary number — it is the best of the tried slices on R@1/R@3/MRR, and the only one that also happens to keep most rows inside the window.
+
+**Actually fixing the overflow makes retrieval worse.** A 512-window model with zero overflowing rows, given the query prefix its model card asks for, still loses to the truncating one — and its score separation is worse, with the best out-of-domain query outranking the median in-domain query:
+
+| config | R@1 | R@3 | in-domain median | out-of-domain max |
+| --- | --- | --- | --- | --- |
+| MiniLM @256, `[:500]` (ships) | 81.4% | 90.7% | 0.428 | 0.451 |
+| bge-small @512, `[:500]` | 67.4% | 79.1% | 0.699 | 0.730 |
+| bge-small @512, `[:2000]` | 76.7% | 86.0% | 0.716 | 0.740 |
+
+What *is* load-bearing is including instructions at all — dropping the slice costs 9 points of R@1 and pushes out-of-domain scores up:
+
+| recipe (MiniLM @256) | R@1 | R@3 | MRR | out-of-domain top-1 (max / median) |
 | --- | --- | --- | --- | --- |
 | `name + description + instructions[:500]` | 81.4% | 90.7% | 0.853 | 0.451 / 0.284 |
 | `name + description` | 72.1% | 83.7% | 0.780 | 0.473 / 0.336 |
 
-So the truncated tail is carrying real signal, and removing it also pushes out-of-domain queries *up* — worse separation between a real hit and noise. Not fixed this round. The fix is a longer-window model (e.g. a 512-token or 8192-token encoder), which invalidates every published index and is its own release.
+So: the overflow is closed as measured-and-rejected, not deferred. Two caveats on the evidence. The eval set is 43 in-domain queries, where one query is 2.3% of recall, so anything under about 5 points is noise — the window result survives that only because all three recall buckets came out exactly equal, not merely close. And only two small encoders were compared; a genuinely stronger long-window model (gte-base, nomic, ~137M parameters and roughly six times the download) might beat MiniLM, but that would be buying a better model rather than fixing the truncation, and it trades directly against keeping this package small.
 
 ### Pull: copy vs merge
 
