@@ -209,6 +209,46 @@ After copy, `_rebuild_fts` reuses `SkillStore._init_db` (single source of truth 
 
 CLI exposes `--log-level` (or env `SKILL_MCP_LOG_LEVEL`). `serve` defaults to INFO.
 
+### Agent registration: write the file, or call their CLI
+
+`_try_register_mcp` covers seven agents by three different routes, and the
+split is deliberate.
+
+Claude Code, Gemini CLI, Cursor and Codex each keep MCP servers in a small
+dedicated file (`.mcp.json`, `settings.json`, `mcp.json`, `config.toml`), so
+`init` edits those directly. OpenClaw and Hermes do not: OpenClaw's
+`~/.openclaw/openclaw.json` is documented with **JSON5** examples, so a user's
+real file can contain comments that `json.load` refuses and `json.dump` would
+erase, and Hermes' `<hermes_home>/config.yaml` is a whole hand-written main
+config that a pyyaml round-trip would reflow. Both ship their own `mcp add`,
+so we shell out and never parse their file. DeepSeek Harness gets neither: its
+entire command surface is `--profile`/`--patch`/`--dump-config` plus `web` and
+`plugin`, registration is a Cordis patch overlay whose format is an explicit
+developer preview, and its shipped examples carry `!!js` tags that `safe_load`
+refuses and an unsafe load would execute. `init` prints the row instead.
+
+Two upstream details are load-bearing and were read out of their parsers, not
+their docs:
+
+- Hermes declares `--args` as `argparse.REMAINDER`, so it swallows everything
+  after it and must come last. More importantly it has **no non-interactive
+  flag**: it prompts with a bare `input()` after probing, and on EOF or a
+  declined prompt it prints `Cancelled.` and **exits 0 without saving**. Its
+  exit code therefore cannot distinguish a write from a no-op, so
+  `_register_hermes` reads `config.yaml` back and only claims success if the
+  key is actually there. Reading is safe; only writing destroys comments.
+- OpenClaw takes `--arg`/`--env`/`--header` as repeated flags, not lists. It is
+  `createOnly`, so re-running against an existing entry fails rather than
+  overwriting, and it connects to the server to probe it before saving unless
+  given `--no-probe`.
+
+Caveat worth keeping in view: **none of these three is installed on any machine
+this has been developed on**, so the delegation is verified against upstream
+source and unit tests with a faked `subprocess.run`, never against the real
+binaries. `tests/test_registration.py` pins the part that would hurt most — that
+we hand OpenClaw its own arguments rather than rewriting its commented config,
+and that a Hermes no-op is never reported as a registration.
+
 ## Extension Points
 
 ### Adding a new embedding backend

@@ -74,7 +74,7 @@ pip install "skill-retrieval-mcp[local,hf]"
 # 2. Download the skill corpus + pre-built vector index
 skill-mcp pull --include-index
 
-# 3. Register with your agent (auto-detects Claude Code, Cursor, etc.)
+# 3. Register with your agent (auto-detects Claude Code, Codex, OpenClaw, etc.)
 skill-mcp init
 ```
 
@@ -83,12 +83,20 @@ Done. Your agent now searches the corpus on demand.
 <details>
 <summary>Manual registration (if <code>init</code> doesn't detect your agent)</summary>
 
+`init` writes the first four config files itself. For OpenClaw and Hermes it
+calls their own `mcp add` instead, because both keep MCP servers inside a
+larger hand-edited config and re-serialising it here would drop your comments.
+DeepSeek Harness has no `mcp add`, so `init` prints the row for you to paste.
+
 | Agent | Config file | Add this |
 |-------|------------|----------|
 | **Claude Code** | `.mcp.json` | `{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}` |
 | **Gemini CLI** | `~/.gemini/settings.json` | same as above |
 | **Cursor** | `.cursor/mcp.json` | same as above |
 | **Codex CLI** | `~/.codex/config.toml` | `[mcp_servers.skill-retrieval]`<br>`command = "skill-mcp"`<br>`args = ["serve"]` |
+| **OpenClaw** | `~/.openclaw/openclaw.json` | `openclaw mcp add skill-retrieval --command skill-mcp --arg serve` |
+| **Hermes** | `<hermes_home>/config.yaml` | `hermes mcp add skill-retrieval --command skill-mcp --args serve` |
+| **DeepSeek Harness** | `$DSH_HOME/cordis.patch.yml` | `- id: skill-retrieval`<br>`  name: '@deepseek-ai/dsh-mcp-client'`<br>`  config: {transport: 'stdio', serverName: 'skill-retrieval', command: 'skill-mcp', args: ['serve']}` |
 
 </details>
 

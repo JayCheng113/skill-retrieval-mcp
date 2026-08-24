@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import click
@@ -121,11 +124,126 @@ def _try_register_mcp(data_path: Path) -> None:
         if click.confirm("Register with Codex CLI (~/.codex/config.toml)?", default=True):
             _register_codex_toml(codex_config, "skill-retrieval", mcp_entry)
 
+    # OpenClaw and Hermes keep their MCP servers inside their main config, which
+    # is JSON5 in one case and hand-commented YAML in the other. Both ship an
+    # `mcp add` subcommand, so let them write their own file rather than parsing
+    # and re-serialising it here — a round-trip through json/yaml would silently
+    # drop every comment the user wrote.
+    _register_openclaw(mcp_entry)
+    _register_hermes(mcp_entry)
+    _print_dsh_snippet(mcp_entry)
+
+
+def _register_openclaw(mcp_entry: dict) -> None:
+    """Register with OpenClaw via its own CLI.
+
+    Its parser collects `--arg` as a repeated flag, so each server argument
+    needs its own; a space-separated list would be read as a single string.
+    Unlike Hermes, `openclaw mcp add` exits 1 on failure, so its exit code is a
+    real verdict and no read-back is needed — which is just as well, since its
+    config is JSON5 and `json.load` cannot parse it.
+    """
+    _register_via_cli(
+        "openclaw",
+        [
+            "mcp",
+            "add",
+            "skill-retrieval",
+            "--command",
+            mcp_entry["command"],
+            *[token for arg in mcp_entry["args"] for token in ("--arg", arg)],
+        ],
+        "OpenClaw",
+    )
+
+
+def _register_via_cli(binary: str, args: list[str], label: str) -> bool:
+    """Register by invoking the agent's own CLI. Returns False if it is absent."""
+    exe = shutil.which(binary)
+    if exe is None:
+        return False
+    if not click.confirm(f"Register with {label} ({binary} {' '.join(args[:2])})?", default=True):
+        return False
+    # stdin/stdout stay attached: these commands prompt, and the user needs to
+    # see and answer that prompt. Their own error output is the report.
+    result = subprocess.run([exe, *args])
+    if result.returncode != 0:
+        click.echo(f"  {binary} exited {result.returncode} — see its output above")
+        return False
+    return True
+
+
+def _register_hermes(mcp_entry: dict) -> None:
+    """Register with Hermes, then confirm it actually landed.
+
+    `hermes mcp add` has no non-interactive flag: it prompts via bare input()
+    after probing, and on EOF or a declined prompt it prints "Cancelled." and
+    exits 0 without saving. Its exit code therefore cannot distinguish a write
+    from a no-op, so the config is read back instead. `--args` is
+    argparse.REMAINDER, so it swallows the rest of the line and must come last.
+    """
+    name = "skill-retrieval"
+    if not _register_via_cli(
+        "hermes",
+        ["mcp", "add", name, "--command", mcp_entry["command"], "--args", *mcp_entry["args"]],
+        "Hermes",
+    ):
+        return
+
+    home = Path(os.environ.get("HERMES_HOME") or _default_hermes_home()).expanduser()
+    config = home / "config.yaml"
+    if _yaml_has_server(config, name):
+        click.echo(f"  Registered in {config}")
+    else:
+        click.echo(f"  Hermes reported no error but {name} is not in {config} — not registered")
+
+
+def _default_hermes_home() -> str:
+    if os.name == "nt":
+        return str(Path(os.environ.get("LOCALAPPDATA", "~")) / "hermes")
+    return "~/.hermes"
+
+
+def _yaml_has_server(config: Path, name: str) -> bool:
+    if not config.exists():
+        return False
+    import yaml
+
+    try:
+        data = yaml.safe_load(config.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return False
+    return name in (data.get("mcp_servers") or {})
+
+
+def _print_dsh_snippet(mcp_entry: dict) -> None:
+    """DeepSeek Harness has no `mcp add`; registration is a Cordis patch overlay.
+
+    Its whole command surface is --profile/--patch/--dump-config plus `web` and
+    `plugin`. Editing the overlay here is not worth it: the format is a
+    developer preview, and shipped examples carry !!js tags that safe_load
+    refuses and an unsafe load would execute.
+    """
+    dsh_home = Path(os.environ.get("DSH_HOME") or "~/.dsh").expanduser()
+    if not dsh_home.exists():
+        return
+    click.echo(f"\nDeepSeek Harness detected at {dsh_home}, but it has no `mcp add` command.")
+    click.echo(f"Add this row to {dsh_home / 'cordis.patch.yml'} yourself:")
+    click.echo(
+        "\n  - id: skill-retrieval\n"
+        "    name: '@deepseek-ai/dsh-mcp-client'\n"
+        "    config:\n"
+        "      transport: 'stdio'\n"
+        "      serverName: 'skill-retrieval'\n"
+        f"      command: '{mcp_entry['command']}'\n"
+        f"      args: {json.dumps(mcp_entry['args'])}\n"
+    )
+
 
 def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
     """Add an MCP server entry to a JSON config file."""
     if path.exists():
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     else:
         data = {}
@@ -135,7 +253,7 @@ def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
 
     data["mcpServers"][name] = entry
 
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
     click.echo(f"  Registered in {path}")
@@ -147,7 +265,7 @@ def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
 
     existing = ""
     if path.exists():
-        existing = path.read_text()
+        existing = path.read_text(encoding="utf-8")
         # Check if already registered
         try:
             data = tomllib.loads(existing)
@@ -158,7 +276,7 @@ def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
             pass
 
     section = f'\n[mcp_servers.{name}]\ncommand = "{entry["command"]}"\nargs = {json.dumps(entry["args"])}\n'
-    with open(path, "a") as f:
+    with open(path, "a", encoding="utf-8") as f:
         f.write(section)
     click.echo(f"  Registered in {path}")
 
