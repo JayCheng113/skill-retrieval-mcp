@@ -88,7 +88,7 @@ def init(ctx, data_dir: str | None, no_register: bool):
     click.echo("    skill-mcp pull --include-index")
     click.echo("  Option B (import your own skills):")
     click.echo("    skill-mcp import --source directory --path <skills-dir>")
-    click.echo("    (index is built automatically after import)")
+    click.echo("    skill-mcp build-index")
 
 
 def _try_register_mcp(data_path: Path) -> None:
