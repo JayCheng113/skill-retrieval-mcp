@@ -154,6 +154,19 @@ One index = one embedding model. Enforced at three levels:
 
 Config is the source of truth for *defaults*. Index metadata is the source of truth for *what was actually used*.
 
+### The embedding text overflows the model window, and the discarded tail is load-bearing
+
+`Skill.to_embedding_text()` is `name + description + instructions[:500]`. `all-MiniLM-L6-v2` accepts 256 word-pieces and silently drops the rest. On the 374-row corpus, 61 rows (16%) overflow: median 47 word-pieces discarded, worst case 225, and for 6 rows the cut lands inside the *description* rather than the instructions slice.
+
+The obvious simplification — drop `instructions[:500]`, since for the overflowing rows it is already a no-op — was measured and rejected. On the 43-query in-domain eval set:
+
+| recipe | R@1 | R@3 | MRR | out-of-domain top-1 (max / median) |
+| --- | --- | --- | --- | --- |
+| `name + description + instructions[:500]` | 81.4% | 90.7% | 0.853 | 0.451 / 0.284 |
+| `name + description` | 72.1% | 83.7% | 0.780 | 0.473 / 0.336 |
+
+So the truncated tail is carrying real signal, and removing it also pushes out-of-domain queries *up* — worse separation between a real hit and noise. Not fixed this round. The fix is a longer-window model (e.g. a 512-token or 8192-token encoder), which invalidates every published index and is its own release.
+
 ### Pull: copy vs merge
 
 ```
@@ -204,6 +217,17 @@ Tools must stay `async`. mcp 2.x runs sync tool callables on a worker thread, an
 1. Read its LICENSE and confirm it permits redistribution
 2. Add a `CuratedRepo(slug, spdx, source)` entry to `CURATED_REPOS` in `importers/curated.py`
 3. Clone it to `<root>/<owner>/<repo>` and re-run `import --source curated`
+
+Step 1 is the hard gate, and step 3 should be measured before it is committed: stage the candidate beside the existing corpus, embed both, and check whether the new rows actually win any query. A repo that never enters a top-3 is weight without reach.
+
+#### Evaluated and not added
+
+`multica-ai/andrej-karpathy-skills` — rejected on both counts, so it does not need re-researching.
+
+- **Licence.** The repository has no LICENSE file (GitHub reports `license: None`). The only MIT claim is a `license: MIT` line in the frontmatter of its single 2.5KB SKILL.md, and the repo's own description says the content is "derived from Andrej Karpathy's observations". A frontmatter string is not a grant from the copyright holder, and this corpus is redistributed.
+- **Reach.** Staged and embedded anyway to check: across 12 queries — including "refactor this function to be simpler", the query it should own — adding it moved no ranking and it entered no top-3.
+
+Popularity is not evidence of fit: this repo has >200k stars. Its content is a CLAUDE.md-style behavioural guideline, not the procedural how-to that `search_skills` is built to surface.
 
 ## Config
 
