@@ -402,7 +402,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 143 tests, ~0.7s
+pytest tests/ -v    # 166 tests, ~5s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
@@ -423,6 +423,21 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | Auto-index | 6 | incremental, no-index, mismatch, no-existing-index, multiple imports |
 | Source compat | 2 | SKILLNET store + dedup priority |
 | Curated importer | 3 | unvetted repo aborts, licence+URL on every row, category |
+
+### The retrieval eval
+
+`tests/eval/retrieval_eval.py` is not a pytest test and is not collected — it needs a built store, a real embedding model, and about a minute:
+
+```bash
+skill-mcp pull && skill-mcp build-index
+python tests/eval/retrieval_eval.py            # or --data-dir /some/other/corpus
+```
+
+It runs 43 in-domain queries, each phrased the way an agent would phrase a task and never echoing the skill's own name, against a set of acceptable answers rather than one. On the shipped 374-skill corpus: **R@1 81.4%, R@3 90.7%, R@5 90.7%, MRR 0.853**. `@3 → @5` is zero gain — the 4th and 5th result never once supplied the answer, which is what the default `k=5` is actually buying. All 4 misses are vocabulary gaps between Google's branding and how a task gets described ("Agent Platform" vs "fine tune a foundation model", "SLO alerting policies" vs "error budget burns"), not gaps in the corpus.
+
+The 15 out-of-domain queries are the more useful half. They name real work the corpus provably does not cover, and their top-1 scores are why **there is no score threshold anywhere in this codebase**: the best out-of-domain score (0.451) sits above the median in-domain score (0.428), so 25 of 43 real hits score at or below the best piece of noise. The threshold sweep the script prints has no working point. If a score cut-off is ever proposed again, run this first.
+
+The numbers in *The embedding text overflows the model window* above came from this harness. Expected-answer sets are pinned to names in the published corpus, so a corpus change is supposed to move these numbers.
 
 ## MCP Server Instructions
 

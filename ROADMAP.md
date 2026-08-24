@@ -3,7 +3,7 @@
 ## v0.2 — Quality & Ecosystem
 
 - [ ] **MCP Prompts** — Expose `find-skills-for-task` prompt template so agents auto-retrieve skills at conversation start, not just via tool calls
-- [ ] **Retrieval benchmark** — Eval set (query → expected skills) with Precision@k / MRR metrics; publish results per embedding backend so users can choose
+- [x] **Retrieval benchmark** — `tests/eval/retrieval_eval.py`: 43 in-domain + 15 out-of-domain queries, Recall@k / MRR, and a score-separation report. Results and cross-backend comparison in `dev.md`
 - [ ] **Skill versioning** — `updated_at` field + `pull` shows diff summary (N new, N updated, N unchanged)
 
 ## v0.3 — Community
