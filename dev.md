@@ -63,9 +63,39 @@ CI used to run a `test-mcp-floor` leg pinned to `mcp==1.14.0` and it was green
 the whole time, because the suite uses the mock embedding backend and dispatches
 in-process — it never spawns a subprocess and never loads a real model. That leg
 is gone along with the shim. The gap it left is the same one that let 0.2.0 ship
-with a server that could not start: **nothing in CI exercises the built
-artifact end-to-end over real stdio.** Until something does, run
-`skill-mcp serve` from a clean install of the wheel before tagging a release.
+with a server that could not start, and it is now closed by the `e2e-stdio` job
+described below.
+
+### The `e2e-stdio` CI job
+
+`tests/e2e/stdio_smoke.py`, run against a wheel installed into a fresh virtualenv,
+is the only thing in CI that touches what users actually receive. It builds a
+store and a FAISS index from the six-skill corpus in `tests/e2e/corpus/` using a
+real sentence-transformers model, launches the venv's own `skill-mcp` console
+script as a subprocess, and speaks the real stdio protocol to it.
+
+Each of its shortcuts was removed for a reason:
+
+- **the installed console script, not `python -m skill_mcp.cli`** — the entry
+  point is generated at install time, so it only exists in the built artifact,
+  and it is what every registration snippet tells an agent to run;
+- **a real embedding model, not the mock backend** — the mcp 1.x failure happens
+  at model load and is invisible to anything that never loads one;
+- **two search queries with different right answers** — one query cannot tell a
+  working ranker apart from a server returning a fixed order;
+- **the tool result's error flag is checked** — MCP reports a server-side tool
+  failure as an ordinary response carrying a flag, so a caller that only reads
+  `.content` sees a plausible string and calls it a pass;
+- **server stderr is captured and dumped on failure** — a server that dies during
+  model load leaves the client holding nothing but `Connection closed`.
+
+It was verified to actually fail: installing the same wheel with `mcp==1.14.0`
+makes the job exit non-zero and print the server's own traceback.
+
+Two things it deliberately does not cover. It runs on Python 3.10 only, the
+declared floor, since the unit matrix already covers 3.11 and 3.12 for import
+compatibility. And it builds its own corpus rather than pulling from HuggingFace,
+so it proves the code path but not the published dataset.
 
 ## Module Responsibilities
 

@@ -29,6 +29,49 @@ jobs:
       - name: Test
         run: pytest tests/ -v --tb=short
 
+  # The `test` job above never spawns a subprocess, never installs the wheel and
+  # never loads a real embedding model, because it runs the source tree in-process
+  # against a mock backend. Two shipped defects lived in exactly that blind spot:
+  # 0.2.0 went out with a server that could not start, and a declared `mcp>=1.14`
+  # floor survived two releases even though loading the model inside a 1.x stdio
+  # server kills it. This job is slower than the rest of CI on purpose — it is the
+  # only one that exercises the artifact users actually receive.
+  e2e-stdio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SKILL_MCP_DATA_DIR: /tmp/skill-mcp-e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      # The declared floor, not the newest interpreter: a packaging problem is
+      # likeliest at the oldest version we promise to support.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Build the wheel
+        run: |
+          pip install build
+          python -m build --wheel
+
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv /tmp/e2e
+          # sentence-transformers pulls torch, and the default wheel carries the
+          # whole CUDA runtime for a job that will only ever run on CPU.
+          /tmp/e2e/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          /tmp/e2e/bin/pip install "$(ls dist/*.whl)[local]"
+
+      - name: Build a store and index with a real embedding model
+        run: |
+          /tmp/e2e/bin/skill-mcp init --no-register
+          /tmp/e2e/bin/skill-mcp import --source directory --path tests/e2e/corpus --no-index
+          /tmp/e2e/bin/skill-mcp build-index
+
+      - name: Drive it over real MCP stdio
+        run: /tmp/e2e/bin/python tests/e2e/stdio_smoke.py /tmp/e2e/bin/skill-mcp "$SKILL_MCP_DATA_DIR"
+
   lint-format:
     runs-on: ubuntu-latest
     steps:
