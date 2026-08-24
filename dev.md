@@ -227,7 +227,7 @@ Config is the source of truth for *defaults*. Index metadata is the source of tr
 
 ### The embedding text overflows the model window, and that turns out not to matter
 
-`Skill.to_embedding_text()` is `name + description + instructions[:500]`. `all-MiniLM-L6-v2` accepts 256 word-pieces and silently drops the rest, so about 16% of rows overflow — median 47 word-pieces discarded, worst case 227, and for a handful the cut lands inside the *description* rather than the instructions slice.
+`Skill.to_embedding_text()` is `name + description + instructions[:500]`. `all-MiniLM-L6-v2` accepts 256 word-pieces and silently drops the rest, so 63 of the 374 rows overflow — median 49 word-pieces discarded, worst case 227, and for a handful the cut lands inside the *description* rather than the instructions slice.
 
 That is a fact about the input. It was assumed to be a fact about the output too, and it is not. Three measurements on the 43-query eval set, all with the shipped retrieval path (normalized vectors, inner product) reproduced in numpy — the control row below matches the shipped numbers to the digit, so the instrument is the same one:
 
@@ -267,6 +267,8 @@ What *is* load-bearing is including instructions at all — dropping the slice c
 | `name + description` | 72.1% | 83.7% | 0.780 | 0.473 / 0.336 |
 
 So: the overflow is closed as measured-and-rejected, not deferred. Two caveats on the evidence. The eval set is 43 in-domain queries, where one query is 2.3% of recall, so anything under about 5 points is noise — the window result survives that only because all three recall buckets came out exactly equal, not merely close. And only two small encoders were compared; a genuinely stronger long-window model (gte-base, nomic, ~137M parameters and roughly six times the download) might beat MiniLM, but that would be buying a better model rather than fixing the truncation, and it trades directly against keeping this package small.
+
+`tests/eval/embedding_recipe_sweep.py` reproduces the second and third tables, and is what keeps the `[:500]` comment in `schema.py` from being an unverifiable claim. It refuses to run if `recipe()` has drifted from `to_embedding_text()`, because a baseline arm that is no longer the shipped recipe makes every row below it meaningless. The first and last tables came from one-off ablations that were not kept — the bge rows there are run *without* the query prefix, so they are not the same arms as the sweep's.
 
 ### Pull: copy vs merge
 
