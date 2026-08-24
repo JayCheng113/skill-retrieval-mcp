@@ -97,6 +97,24 @@ declared floor, since the unit matrix already covers 3.11 and 3.12 for import
 compatibility. And it builds its own corpus rather than pulling from HuggingFace,
 so it proves the code path but not the published dataset.
 
+The job takes about 75 seconds, so the cost of keeping it is small.
+
+Two things about it are not obvious and cost three red runs to learn.
+
+The first is that **the pip inside a fresh 3.10 virtualenv is 23.0.1**, which
+discards any wheel whose metadata spells its own name differently from the
+request — `Jinja2` for `jinja2`, `typing_extensions` for `typing-extensions` —
+then falls back to the sdist and dies installing its build dependencies. Torch's
+dependency closure trips this every time. The step upgrades pip before installing
+anything, and a source build should be read as this bug returning, not as a
+missing wheel.
+
+The second is that **Actions run logs require admin credentials over the REST
+API**, so the first red run was completely unreadable from a script. Annotations
+are not privileged, so the `Surface the install failure` step folds the tail of
+each pip log into one `::error::` annotation. That is the only reason the pip
+version above was ever identified; it is diagnostic scaffolding kept on purpose.
+
 ## Module Responsibilities
 
 | Module | Lines | Role |
