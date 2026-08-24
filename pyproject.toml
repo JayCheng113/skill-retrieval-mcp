@@ -28,7 +28,10 @@ classifiers = [
 dependencies = [
     # 1.14 is the floor: earlier releases crash in Tool.from_function on
     # Annotated[...] parameters (issubclass on a non-class annotation).
-    "mcp>=1.14,<2",
+    # There is no upper cap: the server uses the FastMCP-style decorator API,
+    # which mcp 2.x kept. The suite and the end-to-end stdio client both run
+    # green on 2.0.
+    "mcp>=1.14",
     "pydantic>=2.11",
     "faiss-cpu>=1.8",
     "numpy>=1.26",

@@ -67,9 +67,36 @@ def test_category_comes_from_upstream_grouping_only(tmp_path):
     store.close()
 
 
+def test_pyyaml_hostile_upstream_skill_still_reaches_the_corpus(tmp_path):
+    """The redistributed corpus is rebuilt from upstream HEAD, which we do not control.
+
+    An unquoted ": " in a description is a hard ScannerError, and 199 of the 2,398
+    real SKILL.md files surveyed quote a description that contains one -- meaning
+    their authors hit this and worked around it. The next upstream commit that
+    forgets the quotes must not silently drop the skill from what we publish.
+    """
+    _write_skill(tmp_path, "obra/superpowers", "skills/brainstorming/SKILL.md", "brainstorming")
+    hostile = tmp_path / "google/skills/skills/cloud/gke-basics/SKILL.md"
+    hostile.parent.mkdir(parents=True)
+    hostile.write_text(
+        "---\nname: gke-basics\ndescription: Use when: the cluster needs scaling\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    store = SkillStore()
+    CuratedImporter().import_skills(tmp_path, store)
+
+    by_name = {s.name: s for s in store.get_all()}
+    assert set(by_name) == {"brainstorming", "gke-basics"}
+    assert by_name["gke-basics"].description == "Use when: the cluster needs scaling"
+    assert by_name["gke-basics"].metadata["license"] == "Apache-2.0"
+    store.close()
+
+
 # ---------------------------------------------------------------------------
 # Tolerant frontmatter (real-world SKILL.md files are not strict YAML)
 # ---------------------------------------------------------------------------
+
 
 def _write_plain_skill(root, name, frontmatter, body=None):
     body = body or f"## Steps for {name}\n\n1. Do the thing.\n"
@@ -149,7 +176,9 @@ def test_frontmatter_category_outranks_directory_inference(tmp_path):
     from skill_mcp.store import SkillStore
 
     root = tmp_path / "skills"
-    _write_plain_skill(root, "tagged", "name: tagged\ndescription: has explicit category\ncategory: design\n")
+    _write_plain_skill(
+        root, "tagged", "name: tagged\ndescription: has explicit category\ncategory: design\n"
+    )
     store = SkillStore(tmp_path / "s.jsonl")
     DirectoryImporter().import_skills(root, store)
     assert store.get_all()[0].category == "design"
