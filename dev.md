@@ -488,6 +488,15 @@ and `O'Brien`, the three shapes where a path stops surviving the round trip,
 and it repoints `HOME`/`USERPROFILE` first: a command that dropped the flag
 would otherwise write into the developer's real `~/.skill-mcp` and pass.
 
+The argv splitter it uses is the platform's own, so the `CommandLineToArgvW`
+branch runs on exactly one CI leg and nowhere else. That made it the natural
+home for an import bug: it reached `_windows_argv` as `tests.test_registration`,
+which resolves only when the repo root is on `sys.path`. `python -m pytest` puts
+it there and the `pytest` console script CI runs does not, so the suite was
+green locally on Windows and red on the one leg that could see it. Import test
+helpers by module name — there is no `tests/__init__.py`, and the directory
+pytest adds is `tests/` itself.
+
 `pull --help`'s example block is deliberately left unscoped. It is static
 reference text baked in at definition time, before any per-invocation
 `--data-dir` exists, and it never executes.

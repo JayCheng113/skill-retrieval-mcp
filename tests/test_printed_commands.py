@@ -43,7 +43,12 @@ def _printed_commands(output: str) -> list[str]:
 
 def _split(line: str) -> list[str]:
     if os.name == "nt":
-        from tests.test_registration import _windows_argv
+        # By module name, not `tests.test_registration`: there is no
+        # `tests/__init__.py`, so the directory pytest puts on `sys.path` is
+        # `tests/` itself. The package spelling resolves only when the repo root
+        # happens to be on the path too, which `python -m pytest` arranges and
+        # the `pytest` console script CI runs does not.
+        from test_registration import _windows_argv
 
         return _windows_argv(line)
     return shlex.split(line)
