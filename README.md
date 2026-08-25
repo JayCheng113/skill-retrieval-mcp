@@ -1,29 +1,23 @@
 # skill-retrieval-mcp
 
-> Your agent doesn't need you to pick the right skill. It needs to search for one on its own.
+[![PyPI](https://img.shields.io/pypi/v/skill-retrieval-mcp.svg)](https://pypi.org/project/skill-retrieval-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/skill-retrieval-mcp.svg)](https://pypi.org/project/skill-retrieval-mcp/)
+[![License](https://img.shields.io/pypi/l/skill-retrieval-mcp.svg)](https://github.com/JayCheng113/skill-retrieval-mcp/blob/main/LICENSE)
+[![CI](https://github.com/JayCheng113/skill-retrieval-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/JayCheng113/skill-retrieval-mcp/actions/workflows/ci.yml)
 
-An MCP server that gives AI agents on-demand access to a licence-vetted corpus of agent skills, collected from seven upstream repositories. The agent searches as it works — the same way you look up docs mid-task.
+Semantic search over a licence-vetted corpus of 374 agent skills, served to your
+coding agent over MCP. Runs locally, answers in single-digit milliseconds, makes
+zero API calls.
 
-Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, and any MCP-compatible agent.
-
-## The Problem
-
-You give your agent a skill — "always use TDD," "follow this API style" — and it works. But manually installing skills doesn't scale:
-
-- **You don't know what exists.** There are thousands of skills out there. You install the 10 you happen to find — everything else, the agent guesses.
-- **You can't install what you can't name.** Mid-task, the agent needs a skill for "OIDC-based PyPI publishing" — but you'd never think to install that in advance.
-- **A skill library doesn't fit in the prompt.** Lazy loading still puts every skill's name and description in front of the model — 37K tokens for this corpus, before the agent has read a single one. The instructions themselves are another 960K.
-
-## The Fix
-
-Don't install skills upfront. **Search them at runtime.**
+Works with **Claude Code**, **Codex CLI**, **Gemini CLI**, **Cursor**, **OpenClaw**,
+**Hermes**, and any MCP-compatible agent.
 
 ```
 You: "Deploy this service to GKE"
 
-─── Step 1: Agent searches ───────────────────────────────────────────
+─── Step 1: the agent searches ───────────────────────────────────────
 
-Agent: search_skills("deploy a containerised service on kubernetes")   ← 4ms
+Agent: search_skills("deploy a containerised service on kubernetes")   ← 6ms
      → 5 results (summaries only, no full instructions):
        1. "gke-service-networking"   (0.56) - Gateway API, Ingress, Cloud Armor, NEGs, managed SSL
        2. "gke-workload-scaling"     (0.51) - HPA and VPA for GKE workloads
@@ -31,78 +25,107 @@ Agent: search_skills("deploy a containerised service on kubernetes")   ← 4ms
        4. "gke-app-onboarding"       (0.46) - Containerizing and deploying an app to GKE for the first time
        5. "gke-basics"               (0.44) - Cluster provisioning, credentials, Autopilot vs Standard
 
-─── Step 2: Agent reads the descriptions and picks #4, not #1 ────────
+─── Step 2: it reads the descriptions and picks #4, not #1 ───────────
 
 Agent: get_skill("gke-app-onboarding")
-     → gets full guide: containerization, manifests, migration path
+     → gets the full guide: containerization, manifests, migration path
      → writes the Dockerfile and deployment.yaml
 
-─── Step 3: New need emerges mid-task ────────────────────────────────
+─── Step 3: a new need emerges mid-task ──────────────────────────────
 
 Agent: # the service has to survive traffic spikes — search again
-       search_skills("autoscale pods on cpu and memory")               ← 4ms
+       search_skills("autoscale pods on cpu and memory")               ← 6ms
      → "gke-workload-scaling" (0.61) - Horizontal and Vertical Pod Autoscaler for GKE
-     → reads guide, adds the HPA manifest
+     → reads the guide, adds the HPA manifest
 ```
 
-Key behaviors:
+Both searches are real output from the shipped corpus, not an illustration.
+Three things in it are the whole design:
 
-- **Search returns summaries, not full instructions** — the agent reads descriptions and scores to decide which skills are worth fetching. Five summaries cost a few hundred tokens; the one skill it actually reads costs about 2,400.
-- **The top hit is not always the right one.** The agent picked #4 because its description says "for the first time" — a judgement the ranking can't make. That is why search returns descriptions instead of auto-injecting the winner.
-- **The agent searches again as the task evolves.** Neither "autoscale" nor "pods" appeared in what the user asked for; those are terms the agent picked up while writing the manifest.
+- **Search returns summaries, not instructions.** Five summaries cost a few
+  hundred tokens; the one skill the agent actually reads costs about 2,400.
+- **The top hit is not always the right one.** The agent picked #4 because its
+  description says *for the first time* — a judgement no ranking can make. That
+  is why search hands back descriptions instead of injecting the winner.
+- **The agent searches again as the task evolves.** Neither "autoscale" nor
+  "pods" appeared in what the user asked for.
 
-Both searches above are real output from the shipped corpus, not an illustration.
-
-< 5ms search, measured end to end including query embedding. Zero LLM calls. Runs locally.
-
-| | Installing skills manually | skill-retrieval-mcp |
-|---|---|---|
-| **Scale** | Dozens, if you're diligent | 374 across 8 upstream repos |
-| **Discovery** | You find and install each one | Agent searches by need |
-| **Selection** | You pick upfront | Agent picks per-task |
-| **Search** | Name matching on descriptions | Semantic, < 5ms, local FAISS |
-| **Provenance** | Whatever you happened to clone | Every skill carries its repo, URL and SPDX licence |
-
-## Quick Start
-
-Three commands. Takes about 2 minutes (mostly download time).
+## Installation
 
 ```bash
-# 1. Install
 pip install "skill-retrieval-mcp[local,hf]"
-
-# 2. Download the skill corpus + pre-built vector index
-skill-mcp pull --include-index
-
-# 3. Register with your agent (auto-detects Claude Code, Codex, OpenClaw, etc.)
-skill-mcp init
+skill-mcp pull --include-index      # corpus + pre-built vector index
+skill-mcp init                      # detect and register with your agents
 ```
 
-Done. Your agent now searches the corpus on demand.
+About two minutes, mostly download. `init` finds the agents you have installed
+and writes their config for you.
 
 <details>
-<summary>Manual registration (if <code>init</code> doesn't detect your agent)</summary>
+<summary>Registering by hand</summary>
 
-`init` writes the first four config files itself. For OpenClaw and Hermes it
-calls their own `mcp add` instead, because both keep MCP servers inside a
-larger hand-edited config and re-serialising it here would drop your comments.
-DeepSeek Harness has no `mcp add`, so `init` prints the row for you to paste.
+`init` writes `.mcp.json`, `~/.gemini/settings.json`, `.cursor/mcp.json` and
+`~/.codex/config.toml` itself. For OpenClaw and Hermes it calls their own
+`mcp add`, because both keep MCP servers inside a larger hand-edited config and
+re-serialising it here would drop your comments. DeepSeek Harness has no
+`mcp add`, so `init` prints the row for you to paste.
 
-| Agent | Config file | Add this |
-|-------|------------|----------|
-| **Claude Code** | `.mcp.json` | `{"mcpServers": {"skill-retrieval": {"command": "skill-mcp", "args": ["serve"]}}}` |
-| **Gemini CLI** | `~/.gemini/settings.json` | same as above |
-| **Cursor** | `.cursor/mcp.json` | same as above |
-| **Codex CLI** | `~/.codex/config.toml` | `[mcp_servers.skill-retrieval]`<br>`command = "skill-mcp"`<br>`args = ["serve"]` |
-| **OpenClaw** | `~/.openclaw/openclaw.json` | `openclaw mcp add skill-retrieval --command skill-mcp --arg serve` |
-| **Hermes** | `<hermes_home>/config.yaml` | `hermes mcp add skill-retrieval --command skill-mcp --args serve` |
-| **DeepSeek Harness** | `$DSH_HOME/cordis.patch.yml` | `- id: skill-retrieval`<br>`  name: '@deepseek-ai/dsh-mcp-client'`<br>`  config: {transport: 'stdio', serverName: 'skill-retrieval', command: 'skill-mcp', args: ['serve']}` |
+If it misses your agent, register this entry yourself:
+
+```json
+{
+  "mcpServers": {
+    "skill-retrieval": {
+      "command": "/absolute/path/to/skill-mcp",
+      "args": ["--data-dir", "/absolute/path/to/data-dir", "serve"]
+    }
+  }
+}
+```
+
+Two details are load-bearing, and both fail silently if you shorten them:
+
+- **`command` has to be an absolute path**, not `skill-mcp`. The agent resolves
+  the name itself, from a session whose `PATH` has routinely never seen the venv
+  or pipx directory you installed into. `which skill-mcp` gives you the value.
+- **`--data-dir` has to be spelled out, and it has to come before `serve`.**
+  `~` is re-resolved in whatever environment the agent spawns the server from,
+  and the config that records your choice lives *inside* the chosen directory,
+  so nothing else can recover it. A server opened on the wrong directory starts
+  cleanly, lists its tools, and answers every search with nothing.
+  `skill-mcp status` prints the resolved directory to use.
 
 </details>
 
-## What's In the Knowledge Base
+## Why search instead of install
 
-374 skills, collected from eight repositories whose licences were read before anything was imported:
+Installing skills by hand works, right up until it doesn't scale:
+
+- **You don't know what exists.** You install the ten you happen to find.
+  Everything else, the agent guesses at.
+- **You can't install what you can't name.** Mid-task the agent needs a skill
+  for "OIDC-based PyPI publishing" — you would never have thought to add it.
+- **A skill library doesn't fit in the prompt.** Lazy loading still puts every
+  skill's name and description in front of the model: 37K tokens for this
+  corpus before it has read a single one. The instructions are another 960K.
+
+| | Installing by hand | skill-retrieval-mcp |
+|---|---|---|
+| **Scale** | Dozens, if you're diligent | 374 across 8 upstream repos |
+| **Discovery** | You find and install each one | The agent searches by need |
+| **Selection** | You pick upfront | The agent picks per task |
+| **Matching** | Name matching on descriptions | Semantic, single-digit ms, local FAISS |
+| **Provenance** | Whatever you happened to clone | Every skill carries its repo, URL and SPDX licence |
+
+On 43 held-out queries phrased the way an agent would phrase a task — never
+echoing a skill's own name — the shipped corpus answers **81.4% at rank 1 and
+90.7% within the top 3**. The harness is in the repo; see
+[`dev.md`](dev.md#the-retrieval-eval) for what it measures and what it found.
+
+## What's in the corpus
+
+374 skills from eight repositories whose licences were read before anything was
+imported:
 
 | Repository | Skills | Licence |
 |------------|--------|---------|
@@ -115,11 +138,15 @@ DeepSeek Harness has no `mcp add`, so `init` prints the row for you to paste.
 | [kepano/obsidian-skills](https://github.com/kepano/obsidian-skills) | 5 | MIT |
 | [Agents365-ai/drawio-skill](https://github.com/Agents365-ai/drawio-skill) | 1 | MIT |
 
-Each skill is a structured best-practice guide — not a one-liner, but a step-by-step how-to with code examples, common pitfalls, and recommendations. The median one runs about 9,600 characters.
+Each skill is a step-by-step guide with code examples, pitfalls and
+recommendations — not a one-liner. The median runs about 9,600 characters.
 
-Every row records the repository it came from, its upstream URL and its SPDX licence, so anything you get back can be traced and attributed. Repositories without a licence permitting redistribution are not imported, even when their content is good.
+Every row records the repository it came from, its upstream URL and its SPDX
+licence, so anything you get back can be traced and attributed. Repositories
+without a licence permitting redistribution are not imported, however good the
+content.
 
-Run `skill-mcp status` to see what you have locally, or use `list_categories` to browse domains.
+`skill-mcp status` shows what you have locally.
 
 ## Tools
 
@@ -127,12 +154,13 @@ Run `skill-mcp status` to see what you have locally, or use `list_categories` to
 |------|-------------|
 | `search_skills` | Semantic search — describe what you need in natural language |
 | `keyword_search` | Exact match — tool names, error messages, CLI commands |
-| `get_skill` | Fetch full instructions (call after search) |
+| `get_skill` | Fetch full instructions; call after searching |
 | `list_categories` | Browse available domains and counts |
 
-Search returns summaries only (saves tokens). The agent calls `get_skill` for the ones it actually needs.
+Search returns summaries only. The agent calls `get_skill` for the ones it
+actually wants, which is where the token saving comes from.
 
-## Add Your Own Skills
+## Adding your own skills
 
 ```markdown
 <!-- ~/my-skills/deploy-checklist/SKILL.md -->
@@ -150,55 +178,86 @@ tags: ["deployment", "production", "checklist"]
 
 ```bash
 skill-mcp import --source directory --path ~/my-skills/
-# index is updated automatically — new skills are searchable immediately
 ```
 
-No manual `build-index` needed. The import detects your existing index and incrementally adds only the new skills. Use `--no-index` to skip this (e.g. when batch-importing from multiple sources).
+The index updates automatically — new skills are searchable immediately, and
+only the new ones are embedded. Pass `--no-index` to skip that when you are
+batch-importing several sources before one build. Your skills merge with the
+corpus; deduplication is automatic.
 
-Custom skills merge with the pre-built ones. Deduplication is automatic.
+## Configuration
 
-## Embedding Backends
+Everything lives in one data directory, `~/.skill-mcp` by default:
 
-Default: `sentence-transformers/all-MiniLM-L6-v2` — local, free, no API key. Pre-built index included.
+```
+~/.skill-mcp/
+├── config.yaml
+├── skills.db          # SQLite + FTS5
+└── index/             # FAISS
+```
+
+Point somewhere else with the global `--data-dir` flag or `SKILL_MCP_DATA_DIR`.
+The flag belongs to the group, so it goes **before** the subcommand:
+
+```bash
+skill-mcp --data-dir /srv/skills pull
+```
+
+### Embedding backends
+
+The default is `sentence-transformers/all-MiniLM-L6-v2` — local, free, no API
+key, and the one the pre-built index was built with.
 
 | Backend | Pre-built index | Requires |
 |---------|-----------------|----------|
-| `sentence-transformers` (default) | yes | Nothing |
+| `sentence-transformers` (default) | yes | nothing |
 | `openai` | build locally | `OPENAI_API_KEY` |
 | `ollama` | build locally | Ollama running |
 
+An index is only valid for the model that built it, so switching means
+rebuilding:
+
 ```bash
-# Switch to OpenAI embeddings:
-# 1. Edit ~/.skill-mcp/config.yaml (set backend: openai, model: text-embedding-3-large)
-# 2. Build the matching index — an index is only valid for the model that built it:
+# set backend: openai, model: text-embedding-3-large in config.yaml, then
 skill-mcp build-index --backend openai
 ```
 
-## CLI Reference
+## CLI reference
 
 ```
-skill-mcp init [--no-register]               Setup + register with agents
-skill-mcp pull [--replace] [--include-index]  Download skills from HuggingFace
-skill-mcp import --source SOURCE --path PATH  Import custom skills
-skill-mcp build-index [--backend B] [--force] Build/update vector index
-skill-mcp serve [--transport stdio|sse]       Start MCP server
-skill-mcp search QUERY [--k N]               Test search from terminal
-skill-mcp status                              Show what's loaded
-skill-mcp dedup                               Remove duplicates
+skill-mcp [--data-dir DIR] [--log-level LEVEL] COMMAND [ARGS]
+
+  init [--data-dir DIR] [--no-register]        Set up the data directory, register with agents
+  pull [--replace] [--include-index]           Download the corpus from HuggingFace
+  import --source SOURCE --path PATH           Import your own skills
+       [--no-index]
+  build-index [--backend B] [--model M]        Build or update the vector index
+       [--force]
+  serve [--transport stdio|sse]                Start the MCP server
+  search QUERY [--k N]                         Search from the terminal
+  status                                       Show what is loaded
+  dedup                                        Remove cross-source duplicates
 ```
 
-All commands support `--data-dir DIR` or env `SKILL_MCP_DATA_DIR`.
+## Contributing
 
-## Development
+Issues and pull requests are welcome at
+[github.com/JayCheng113/skill-retrieval-mcp](https://github.com/JayCheng113/skill-retrieval-mcp/issues).
+[`dev.md`](dev.md) documents the architecture and the reasoning behind the
+design decisions, including what was tried and rejected — read it before a
+non-trivial change.
+
+To propose a repository for the corpus, open an issue with its licence and a
+case for what it covers that the current 374 do not. The bar is in
+[`dev.md`](dev.md#adding-a-repository-to-the-curated-corpus): a licence that
+permits redistribution, and evidence the skills actually win queries.
 
 ```bash
 git clone https://github.com/JayCheng113/skill-retrieval-mcp
 cd skill-retrieval-mcp
 pip install -e ".[all,dev]"
-pytest tests/ -v    # 143 tests, ~0.7s
+pytest tests/ -v    # 240 tests, ~6s
 ```
-
-Architecture and design decisions: [`dev.md`](dev.md)
 
 ## License
 

@@ -630,7 +630,9 @@ The numbers in *The embedding text overflows the model window* above came from t
 
 The server passes an `instructions` string during MCP initialization. This tells the agent what the knowledge base contains and how tools relate to each other (search → get_skill workflow), so the agent can decide when to search based on the task — no extra configuration or agent-specific instruction files needed.
 
-This is set via `Server(name, instructions=...)` in `server.py`. The instructions emphasize the **breadth** of the knowledge base (virtually every technical domain) and the **low cost** of searching (< 5ms, zero API calls) to encourage agents to search proactively. The design principle: rather than listing specific trigger scenarios (which limits when agents search), communicate that skills exist for nearly any task and searching is essentially free.
+This is set via `Server(name, instructions=...)` in `server.py`. The instructions emphasize the **breadth** of the knowledge base (virtually every technical domain) and the **low cost** of searching (a few milliseconds, zero API calls) to encourage agents to search proactively. The design principle: rather than listing specific trigger scenarios (which limits when agents search), communicate that skills exist for nearly any task and searching is essentially free.
+
+The latency wording is deliberately "a few milliseconds" and not a bound. 60 warm end-to-end `retrieve()` calls against the shipped 374-skill corpus measured **min 4.4ms, p50 6.1ms, p90 8.8ms, max 9.5ms** — a single-digit figure, but not one that stays under 5. A number an agent could hold us to is a number that has to be re-measured on hardware we do not own; the claim we can defend is the order of magnitude, and the order of magnitude is the part that changes the agent's behaviour.
 
 ## MCP Tool Interface
 
@@ -655,7 +657,7 @@ This means: 5 results searched, 1–2 skills fetched → 60–80% token savings 
   ]
 ```
 
-Semantic search via FAISS. Agent reviews the returned descriptions and scores, then calls `get_skill` only for the most relevant results. Tool description emphasizes domain breadth and low search cost (< 5ms) to encourage agents to search proactively for any task.
+Semantic search via FAISS. Agent reviews the returned descriptions and scores, then calls `get_skill` only for the most relevant results. Tool description emphasizes domain breadth and low search cost (a few milliseconds) to encourage agents to search proactively for any task.
 
 ### get_skill
 
