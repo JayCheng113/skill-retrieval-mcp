@@ -95,9 +95,23 @@ def init(ctx, data_dir: str | None, no_register: bool):
 
 
 def _try_register_mcp(data_path: Path) -> None:
-    """Try to register the MCP server with known agents."""
+    """Try to register the MCP server with known agents.
+
+    The command is resolved to a path because the agent, not the shell that ran
+    `init`, is what looks it up. Editors and desktop apps are launched from a
+    session whose PATH routinely lacks the venv or pipx directory the user
+    installed into, and a bare name there fails with an ENOENT on a name they
+    never typed. A resolved path can go stale if that install moves, but the
+    error then names the path that went away.
+    """
+    exe = shutil.which("skill-mcp")
+    if exe is None:
+        click.echo(
+            "Note: `skill-mcp` is not on PATH, so each agent will be told to look "
+            "it up itself. If a server fails to start, put it on PATH and re-run."
+        )
     mcp_entry = {
-        "command": "skill-mcp",
+        "command": exe or "skill-mcp",
         "args": ["serve"],
     }
 
@@ -298,50 +312,115 @@ def _print_dsh_snippet(mcp_entry: dict) -> None:
         "        config:\n"
         "          transport: 'stdio'\n"
         "          serverName: 'skill-retrieval'\n"
-        f"          command: '{mcp_entry['command']}'\n"
-        f"          args: {json.dumps(mcp_entry['args'])}\n"
+        f"          command: {_quoted(mcp_entry['command'])}\n"
+        f"          args: {json.dumps(mcp_entry['args'], ensure_ascii=False)}\n"
     )
 
 
 def _register_mcp_json(path: Path, name: str, entry: dict) -> None:
-    """Add an MCP server entry to a JSON config file."""
+    """Add an MCP server entry to a JSON config file.
+
+    Shared by Claude Code, Gemini CLI and Cursor, so it meets whatever three
+    different tools and their users have left on disk. It refuses rather than
+    guesses: a file that does not parse is far more likely to be one we would
+    damage — Cursor and VS Code both accept comments in theirs — than one that
+    is actually broken, and rewriting it is the same harm that sends OpenClaw
+    and Hermes through their own `mcp add`. Raising instead would abort
+    `skill-mcp init`, of which this is only one step.
+    """
+    data: dict = {}
     if path.exists():
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    else:
-        data = {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            _echo_manual_json(path, name, entry, "is not JSON we can parse")
+            return
+        if not isinstance(data, dict):
+            _echo_manual_json(path, name, entry, "does not hold a JSON object")
+            return
+        servers = data.get("mcpServers")
+        if servers is not None and not isinstance(servers, dict):
+            _echo_manual_json(
+                path, name, entry, 'spells "mcpServers" as something other than an object'
+            )
+            return
 
-    if "mcpServers" not in data:
-        data["mcpServers"] = {}
-
-    data["mcpServers"][name] = entry
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-
+    data.setdefault("mcpServers", {})[name] = entry
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     click.echo(f"  Registered in {path}")
 
 
+def _echo_manual_json(path: Path, name: str, entry: dict, reason: str) -> None:
+    click.echo(f'  {path} {reason}, so it was left alone. Add this under "mcpServers":')
+    click.echo("\n" + json.dumps({name: entry}, indent=2) + "\n")
+
+
 def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
-    """Add an MCP server entry to Codex CLI's TOML config."""
+    """Add an MCP server entry to Codex CLI's TOML config by appending a table.
+
+    Whether a `[mcp_servers.<name>]` header may be appended is decided by
+    parsing the result, not by inspecting the parsed config first: `mcp_servers`
+    can be a standard table, an inline table or a plain value, and an inline
+    table is a closed `dict` that no header may extend — nothing in the parsed
+    value tells the two apart. Getting it wrong does not spoil our entry, it
+    stops Codex loading the file at all, so the user loses their whole setup and
+    the parse error points at our table rather than at anything they wrote.
+    """
     import tomllib
 
     existing = ""
     if path.exists():
-        existing = path.read_text(encoding="utf-8")
-        # Check if already registered
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError as e:
+            # TOML is defined as UTF-8, so Codex cannot read this either — but
+            # registration is one step of `init` and must not abort the rest.
+            _refuse_codex(path, f"is not UTF-8 ({e})", name, entry)
+            return
         try:
             data = tomllib.loads(existing)
-            if name in data.get("mcp_servers", {}):
-                click.echo(f"  Already registered in {path}")
-                return
-        except Exception:
-            pass
+        except tomllib.TOMLDecodeError as e:
+            _refuse_codex(path, f"is not valid TOML ({e})", name, entry)
+            return
+        servers = data.get("mcp_servers")
+        if isinstance(servers, dict) and name in servers:
+            click.echo(f"  Already registered in {path}")
+            return
 
-    section = f'\n[mcp_servers.{name}]\ncommand = "{entry["command"]}"\nargs = {json.dumps(entry["args"])}\n'
-    with open(path, "a", encoding="utf-8") as f:
-        f.write(section)
+    candidate = existing + _codex_section(name, entry)
+    try:
+        tomllib.loads(candidate)
+    except tomllib.TOMLDecodeError:
+        _refuse_codex(path, 'spells "mcp_servers" in a form this table cannot extend', name, entry)
+        return
+
+    path.write_text(candidate, encoding="utf-8")
     click.echo(f"  Registered in {path}")
+
+
+def _codex_section(name: str, entry: dict) -> str:
+    return (
+        f"\n[mcp_servers.{name}]\n"
+        f"command = {_quoted(entry['command'])}\n"
+        f"args = {json.dumps(entry['args'], ensure_ascii=False)}\n"
+    )
+
+
+def _refuse_codex(path: Path, reason: str, name: str, entry: dict) -> None:
+    click.echo(f"  {path} {reason}, so it was left alone. Add this yourself:")
+    click.echo(_codex_section(name, entry))
+
+
+def _quoted(value: str) -> str:
+    """A quoted scalar for the TOML and YAML we hand-write.
+
+    Both languages read a backslash inside a double-quoted string as the start
+    of an escape, so an absolute Windows path pasted in raw does not survive:
+    `C:\\Users` opens a unicode escape that never completes, and the file stops
+    parsing entirely. JSON's string grammar is the common subset both accept, so
+    a json literal reads back as the same characters in either.
+    """
+    return json.dumps(value, ensure_ascii=False)
 
 
 @main.command()

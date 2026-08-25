@@ -365,6 +365,49 @@ rather than rewriting its commented config, that a Hermes no-op or disabled
 entry is never reported as a registration, and that the DeepSeek snippet is an
 insert — but the binaries have never run here.
 
+#### The four configs we write ourselves
+
+Delegating to `mcp add` is what protects OpenClaw and Hermes. The four files
+`init` edits directly had no such protection, and putting the real shapes
+through them turned up the same class of defect three more times.
+
+- **The command has to be a path, not a name.** Every route used to write
+  `command: "skill-mcp"`, which the *agent* resolves — and an editor or desktop
+  app is launched from a session whose PATH routinely has never seen the venv or
+  pipx directory the user installed into. The failure is an ENOENT on a name
+  they never typed, and it is the most common reason an MCP server simply never
+  appears. `_try_register_mcp` resolves it once with `shutil.which` and passes
+  the result to all seven. A resolved path can go stale if that install moves,
+  but the error then names the path that went away; when `which` finds nothing
+  we say so rather than writing a guess in silence.
+- **A config we cannot parse has to be left alone.** `_register_mcp_json` is
+  shared by Claude Code, Gemini CLI and Cursor, so it meets whatever three tools
+  and their users left on disk. An empty file, a trailing comma, a non-object
+  root, an `mcpServers` that is a list — each of those raised out of
+  `_register_mcp_json` and took all of `skill-mcp init` with it. Comments are
+  the interesting case: Cursor and VS Code both accept them, so that file works
+  fine for its owner and re-serialising it is the same harm we avoid for
+  OpenClaw. It now prints the entry and leaves the file byte-identical.
+- **Appending TOML cannot be decided by looking at the shape.**
+  `_register_codex_toml` adds a `[mcp_servers.<name>]` table, which is valid
+  only if nothing already claims that key in a form it cannot extend. It used to
+  swallow a parse failure and append anyway, and its already-registered check
+  ran `name in data.get("mcp_servers", {})` with no type test — so a **valid**
+  Codex config saying `mcp_servers = []` or `mcp_servers = "disabled"` got a
+  colliding table, we printed `Registered in`, and Codex could then load *none*
+  of its config. Guarding on `isinstance(..., dict)` is not enough either: an
+  inline table `mcp_servers = { other = {...} }` parses to a `dict` exactly like
+  a standard table does, yet it is closed and no header may extend it. Nothing
+  in the parsed value tells them apart, so the append is now decided by parsing
+  the candidate file and keeping it only if it still loads.
+- **TOML and YAML both eat backslashes.** Resolving the command to an absolute
+  path turned a latent quoting bug live: `command = "C:\Users\..."` opens a
+  unicode escape that never completes, so on Windows every Codex registration
+  would have written an unloadable config. The DeepSeek snippet had the mirror
+  of it — a single-quoted YAML scalar ends at the first apostrophe, which an
+  account name like `O'Brien` puts straight into the path. `_quoted` emits a
+  JSON literal, the grammar both languages read back unchanged.
+
 ## Extension Points
 
 ### Adding a new embedding backend
@@ -440,7 +483,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 169 tests, ~6s
+pytest tests/ -v    # 199 tests, ~6s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
