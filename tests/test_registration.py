@@ -10,9 +10,12 @@ would pass any shape-based test while silently eating the user's comments.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -421,6 +424,202 @@ def test_the_registered_command_is_one_the_agent_can_find(tmp_path, monkeypatch)
     assert data["mcpServers"]["skill-retrieval"]["command"] == str(installed)
 
 
+def test_the_registered_server_looks_where_init_just_put_things(tmp_path, monkeypatch):
+    """`init --data-dir` prepares one directory and the agent must start us on it.
+
+    A server pointed at the wrong directory does not fail: it starts cleanly,
+    the agent lists its tools, and every search comes back empty. `~` is
+    re-resolved in whatever environment the agent spawns us from, and the
+    config that records the choice is written inside the chosen directory, so
+    nothing recovers it once the argv has dropped it.
+
+    Asserted by running the registered argv and asking the CLI where it looks,
+    rather than by reading back the argv we just wrote.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    data_dir = tmp_path / "elsewhere"
+    data_dir.mkdir()
+    home = tmp_path / "home"
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "absent"))
+    monkeypatch.setattr(cli.shutil, "which", lambda b: None)
+    monkeypatch.setattr(cli.click, "confirm", lambda *a, **k: True)
+
+    cli._try_register_mcp(data_dir)
+
+    entry = json.loads((project / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"][
+        "skill-retrieval"
+    ]
+    # `status` reports the directory `serve` would open; everything else is the
+    # argv the agent was handed.
+    argv = ["status" if a == "serve" else a for a in entry["args"]]
+    result = subprocess.run(
+        [sys.executable, "-m", "skill_mcp.cli", *argv],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "PYTHONPATH": os.pathsep.join(p for p in sys.path if p),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert str(data_dir) in result.stdout, result.stdout
+
+
+def _windows_argv(line: str) -> list[str]:
+    """The real Windows command-line parser, not a model of one."""
+    import ctypes
+
+    to_argv = ctypes.windll.shell32.CommandLineToArgvW
+    to_argv.argtypes = [ctypes.c_wchar_p, ctypes.POINTER(ctypes.c_int)]
+    to_argv.restype = ctypes.POINTER(ctypes.c_wchar_p)
+    argc = ctypes.c_int(0)
+    argv = to_argv(line, ctypes.byref(argc))
+    try:
+        return [argv[i] for i in range(argc.value)]
+    finally:
+        ctypes.windll.kernel32.LocalFree(argv)
+
+
+def _shell_parsers() -> dict:
+    """Every parser that can see a line `init` prints, on this platform.
+
+    `CommandLineToArgvW` is what turns a Windows command line into argv, so on
+    Windows it is the parser, not a model of one. `shlex` is POSIX word
+    splitting, which is what sh and the bash shipped with Git for Windows do to
+    a line before any word is expanded.
+
+    Neither performs expansion, so neither can speak for a directory whose name
+    contains `%`, `$` or a backtick — and no quoting can either, on Windows. See
+    `_scope_flag`; those names are out of scope rather than covered here.
+    """
+    if os.name == "nt":
+        return {"CommandLineToArgvW": _windows_argv, "POSIX splitting (Git bash)": shlex.split}
+    return {"sh": shlex.split}
+
+
+@pytest.mark.parametrize("name", ["plain", "my data", "O'Brien", "a&b", 'a"b', "trailing\\"])
+def test_the_next_steps_init_prints_target_the_directory_it_just_set_up(
+    name, tmp_path, monkeypatch
+):
+    """The commands `init` tells the user to run next are part of the product.
+
+    Two ways they mislead: printed with no data directory, a user who chose one
+    and then pastes them populates the default directory instead — success
+    everywhere, and a server that finds nothing. Printed with a directory the
+    shell re-splits, the paste runs a different command than the one shown.
+
+    Asserted by handing the line to the parsers that will actually see it,
+    because a substring check passes on a line whose quoting is broken.
+    """
+    from click.testing import CliRunner
+
+    if os.name == "nt" and set(name) & set('<>:"/\\|?*'):
+        pytest.skip("not a legal Windows directory name")
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    data_dir = tmp_path / name
+
+    result = CliRunner().invoke(
+        cli.main, ["init", "--data-dir", str(data_dir), "--no-register"], catch_exceptions=False
+    )
+
+    printed = [
+        ln.strip() for ln in result.output.splitlines() if ln.strip().startswith("skill-mcp")
+    ]
+    assert printed
+    for line in printed:
+        for shell, split in _shell_parsers().items():
+            argv = split(line)
+            assert argv[1] == "--data-dir", (shell, line, argv)
+            assert Path(argv[2]) == data_dir.resolve(), (shell, line, argv)
+            # The subcommand and its options follow the directory; a quote that
+            # never closes swallows them into it without any error.
+            assert argv[3:], (shell, line, argv)
+
+
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="a directory that resolves with a trailing separator is a Windows drive root; "
+    "the POSIX form of the same defect is the `trailing\\` case above",
+)
+def test_the_printed_data_dir_survives_a_directory_that_ends_in_a_separator(monkeypatch):
+    """A drive root resolves to `D:\\`, and its trailing backslash escapes the
+    closing quote of a naively quoted argument — so the rest of the line, the
+    subcommand included, is swallowed into the directory value.
+
+    Reachable by hand (`init --data-dir D:\\`), and not reachable through a
+    tmp_path, which is why this goes at the argument rather than at `init`.
+    """
+    root = Path(Path(sys.executable).anchor)
+    monkeypatch.setattr(cli, "_default_data_dir", lambda: root / "not-this-one")
+
+    line = f"skill-mcp {cli._scope_flag(root)}build-index"
+
+    for shell, split in _shell_parsers().items():
+        argv = split(line)
+        assert Path(argv[2]) == root, (shell, line, argv)
+        assert argv[3:] == ["build-index"], (shell, line, argv)
+
+
+def test_init_records_a_data_dir_that_still_resolves_from_another_cwd(tmp_path, monkeypatch):
+    """`--data-dir ./data` is resolved against the cwd `init` ran in, but the
+    config recording it is read from wherever the agent or the user later is.
+
+    Recorded verbatim, it names a different directory there — or none — which is
+    the same silent miss the registered argv was just fixed to avoid, left open
+    for anyone who types a relative path.
+    """
+    from click.testing import CliRunner
+
+    from skill_mcp.config import load_config
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (tmp_path / "here").mkdir()
+    (tmp_path / "there").mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(tmp_path / "here")
+
+    CliRunner().invoke(
+        cli.main, ["init", "--data-dir", "./data", "--no-register"], catch_exceptions=False
+    )
+    written = (tmp_path / "here" / "data" / "config.yaml").read_text(encoding="utf-8")
+    assert written
+
+    monkeypatch.chdir(tmp_path / "there")
+    config = load_config(tmp_path / "here" / "data" / "config.yaml")
+    assert config.resolved_data_dir.resolve() == (tmp_path / "here" / "data").resolve()
+
+
+def test_init_keeps_a_home_relative_data_dir_portable(tmp_path, monkeypatch):
+    """`~` resolves per-machine, which is the point on a synced dotfile — so the
+    fix for a relative path must not flatten the default into one machine's home.
+    """
+    from click.testing import CliRunner
+
+    from skill_mcp.config import load_config
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOME", str(home))
+
+    CliRunner().invoke(cli.main, ["init", "--no-register"], catch_exceptions=False)
+
+    config = load_config(home / ".skill-mcp" / "config.yaml")
+    assert config.data_dir.startswith("~"), config.data_dir
+
+
 def test_codex_registration_survives_a_windows_command_path(tmp_path):
     """TOML interprets backslash escapes inside a basic string, so a Windows
     path written verbatim makes the file unparseable: `C:\\Users` opens a
@@ -432,11 +631,13 @@ def test_codex_registration_survives_a_windows_command_path(tmp_path):
     """
     config = tmp_path / "config.toml"
     command = r"C:\Users\v-zhancheng\venv\Scripts\skill-mcp.exe"
+    args = ["--data-dir", r"C:\Users\v-zhancheng\.skill-mcp", "serve"]
 
-    cli._register_codex_toml(config, "skill-retrieval", {"command": command, "args": ["serve"]})
+    cli._register_codex_toml(config, "skill-retrieval", {"command": command, "args": args})
 
     data = tomllib.loads(config.read_text(encoding="utf-8"))
     assert data["mcp_servers"]["skill-retrieval"]["command"] == command
+    assert data["mcp_servers"]["skill-retrieval"]["args"] == args
 
 
 def test_deepseek_snippet_survives_an_apostrophe_in_the_command_path(tmp_path, monkeypatch, capsys):
@@ -450,13 +651,15 @@ def test_deepseek_snippet_survives_an_apostrophe_in_the_command_path(tmp_path, m
     dsh.mkdir()
     monkeypatch.setenv("DSH_HOME", str(dsh))
     command = r"C:\Users\O'Brien\venv\Scripts\skill-mcp.exe"
+    args = ["--data-dir", r"C:\Users\O'Brien\.skill-mcp", "serve"]
 
-    cli._print_dsh_snippet({"command": command, "args": ["serve"]})
+    cli._print_dsh_snippet({"command": command, "args": args})
 
     snippet = capsys.readouterr().out.split("cordis.patch.yml", 1)[1].split("\n", 1)[1]
     (op,) = yaml.safe_load(snippet)
     (row,) = op["insert"]
     assert row["config"]["command"] == command
+    assert row["config"]["args"] == args
 
 
 def test_json_registration_survives_a_non_ascii_path(tmp_path):

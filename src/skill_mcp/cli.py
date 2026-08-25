@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -67,10 +68,10 @@ def init(ctx, data_dir: str | None, no_register: bool):
     # Global --data-dir takes precedence, then local --data-dir, then default
     global_dir = ctx.obj.get("data_dir") if ctx.obj else None
     data_dir = global_dir or data_dir or "~/.skill-mcp"
-    data_path = Path(data_dir).expanduser()
+    data_path = Path(data_dir).expanduser().resolve()
     data_path.mkdir(parents=True, exist_ok=True)
 
-    config = Config(data_dir=data_dir)
+    config = Config(data_dir=_portable_data_dir(data_dir, data_path))
     save_config(config)
     click.echo(f"Config saved to {config.config_path}")
 
@@ -87,12 +88,55 @@ def init(ctx, data_dir: str | None, no_register: bool):
     if not no_register:
         _try_register_mcp(data_path)
 
+    # Every command below reads the data directory, and the one that records this
+    # choice lives inside it — so a user who chose a directory and then pastes
+    # these lines populates the default one instead, with no error anywhere.
+    scope = _scope_flag(data_path)
+
     click.echo("\nInitialization complete! Next steps:")
     click.echo("  Option A (quick start with the curated skill corpus):")
-    click.echo("    skill-mcp pull --include-index")
+    click.echo(f"    skill-mcp {scope}pull --include-index")
     click.echo("  Option B (import your own skills):")
-    click.echo("    skill-mcp import --source directory --path <skills-dir>")
-    click.echo("    skill-mcp build-index")
+    click.echo(f"    skill-mcp {scope}import --source directory --path <skills-dir>")
+    click.echo(f"    skill-mcp {scope}build-index")
+
+
+def _default_data_dir() -> Path:
+    return Path("~/.skill-mcp").expanduser().resolve()
+
+
+def _portable_data_dir(data_dir: str, data_path: Path) -> str:
+    """What `config.yaml` should record, given what the user typed.
+
+    The file is read from whatever directory the agent or the user is in later,
+    so a relative path recorded verbatim names somewhere else there. `~` does
+    survive the move — and re-resolving it per machine is the point on a synced
+    dotfile — so it is kept as typed.
+    """
+    if data_dir.startswith("~") or Path(data_dir).is_absolute():
+        return data_dir
+    return str(data_path)
+
+
+def _scope_flag(data_path: Path) -> str:
+    """The `--data-dir` that the printed next steps carry, quoted to paste.
+
+    Windows gets forward slashes: a resolved directory can end in a backslash
+    (`D:\\`), which escapes the closing quote and swallows the rest of the line
+    into the value, and every Windows API accepts `/` anyway. Wrapping is
+    unconditional because a double quote cannot appear in a Windows path.
+
+    That covers separators, spaces and apostrophes in every shell a Windows user
+    is likely to paste into. It cannot cover a directory whose name expands:
+    `%X%` is substituted by cmd inside double quotes, `$X` by PowerShell and Git
+    bash, and a backtick starts a substitution in bash and an escape in
+    PowerShell. All three are legal in a Windows path and none has a quoting
+    that is inert in cmd as well — cmd understands no quote but this one.
+    """
+    if data_path == _default_data_dir():
+        return ""
+    quoted = f'"{data_path.as_posix()}"' if os.name == "nt" else shlex.quote(str(data_path))
+    return f"--data-dir {quoted} "
 
 
 def _try_register_mcp(data_path: Path) -> None:
@@ -104,6 +148,12 @@ def _try_register_mcp(data_path: Path) -> None:
     installed into, and a bare name there fails with an ENOENT on a name they
     never typed. A resolved path can go stale if that install moves, but the
     error then names the path that went away.
+
+    The data directory is spelled out for the same reason, and matters more: a
+    server opened on the wrong one starts cleanly and answers every search with
+    nothing, so there is no error to follow. `~` is re-resolved in whatever
+    environment the agent spawns us from, and the config recording the choice is
+    written inside the chosen directory, so nothing else can recover it.
     """
     exe = shutil.which("skill-mcp")
     if exe is None:
@@ -113,7 +163,8 @@ def _try_register_mcp(data_path: Path) -> None:
         )
     mcp_entry = {
         "command": exe or "skill-mcp",
-        "args": ["serve"],
+        # --data-dir belongs to the group, so it precedes the subcommand.
+        "args": ["--data-dir", str(data_path), "serve"],
     }
 
     # Claude Code — project-level .mcp.json

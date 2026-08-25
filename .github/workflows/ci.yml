@@ -8,10 +8,20 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12"]
+        # Registration writes config for editors and desktop apps, and two of
+        # the defects it shipped were Windows-only: a path written into TOML
+        # opened a unicode escape, and a resolved drive root escaped the closing
+        # quote of a printed command. Both branches are `os.name == "nt"`, so a
+        # Linux-only matrix cannot see either. Paired with the oldest
+        # interpreter because nothing else covers that combination.
+        include:
+          - os: windows-latest
+            python-version: "3.10"
 
     steps:
       - uses: actions/checkout@v4

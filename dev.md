@@ -99,6 +99,17 @@ so it proves the code path but not the published dataset.
 
 The job takes about 75 seconds, so the cost of keeping it is small.
 
+### The Windows leg of the unit matrix
+
+The unit matrix also runs `windows-latest` on 3.10. Registration writes config
+for editors and desktop apps, and two of the defects it shipped were
+Windows-only: a resolved command path written into TOML opened a unicode escape
+(`C:\Users` → `\U`), and a resolved drive root escaped the closing quote of a
+printed command. Both fixes live behind `os.name == "nt"`, which a Linux-only
+matrix cannot execute at all — and green on the maintainer's Windows box proves
+as little about Linux as green on Linux proves about Windows. It is paired with
+the oldest interpreter because nothing else covers that combination.
+
 Two things about it are not obvious and cost three red runs to learn.
 
 The first is that **the pip inside a fresh 3.10 virtualenv is 23.0.1**, which
@@ -369,7 +380,7 @@ insert — but the binaries have never run here.
 
 Delegating to `mcp add` is what protects OpenClaw and Hermes. The four files
 `init` edits directly had no such protection, and putting the real shapes
-through them turned up the same class of defect three more times.
+through them turned up the same class of defect several more times.
 
 - **The command has to be a path, not a name.** Every route used to write
   `command: "skill-mcp"`, which the *agent* resolves — and an editor or desktop
@@ -380,6 +391,39 @@ through them turned up the same class of defect three more times.
   the result to all seven. A resolved path can go stale if that install moves,
   but the error then names the path that went away; when `which` finds nothing
   we say so rather than writing a guess in silence.
+- **The data directory has to be spelled out for the same reason, and it matters
+  more.** The argv was a bare `serve`, so `init --data-dir` prepared one
+  directory and every agent opened another: `~` is re-resolved in whatever
+  environment the agent spawns us from, and the config recording the choice is
+  written *inside* the chosen directory, so nothing recovers it. Unlike a missing
+  command this produces no error at all — the server starts, the agent lists its
+  tools, and every search comes back empty. `init` now resolves the directory and
+  the argv carries `--data-dir <path>` ahead of the subcommand. All four foreign
+  parsers were re-checked against that shape rather than assumed: Hermes'
+  `argparse.REMAINDER` and OpenClaw's repeated `--arg` both keep a value that
+  starts with `--`, and Codex's `RawMcpServerConfig` takes `command` + `args`
+  with everything else optional.
+- **The next steps `init` prints are part of the product.** They named plain
+  `skill-mcp pull` / `import` / `build-index`, so a user who chose a directory
+  and pasted them filled the default one instead — success on every line, and a
+  server that finds nothing. They now carry the same `--data-dir` when it is not
+  the default, quoted so that pasting it runs the command that was shown: a
+  resolved directory can end in a backslash (`init --data-dir D:\`), which
+  escapes the closing quote and swallows the subcommand into the value. Windows
+  gets forward slashes and unconditional quotes — a double quote cannot appear
+  in a Windows path — and POSIX gets `shlex.quote`. Checked by parsing the
+  printed line with `CommandLineToArgvW` and `shlex`, not by looking for the
+  path inside it. A directory whose name *expands* is out of scope and has no
+  fix on Windows: cmd substitutes `%X%` inside double quotes, PowerShell and Git
+  bash substitute `$X`, a backtick starts a substitution in bash and an escape
+  in PowerShell, and cmd understands no quote but the double one.
+- **`config.yaml` has to record a directory that survives a change of cwd.** It
+  stored `--data-dir` exactly as typed, so `init --data-dir ./data` wrote
+  `data_dir: ./data` into a file that is read from wherever the agent or the
+  user is later — the same silent miss the argv was just fixed for, left open
+  for anyone who types a relative path. A relative path is now resolved before
+  it is recorded; `~` is kept as typed, because re-resolving it per machine is
+  the point on a synced dotfile.
 - **A config we cannot parse has to be left alone.** `_register_mcp_json` is
   shared by Claude Code, Gemini CLI and Cursor, so it meets whatever three tools
   and their users left on disk. An empty file, a trailing comma, a non-object
@@ -492,7 +536,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 200 tests, ~6s
+pytest tests/ -v    # 210 tests, ~6s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
