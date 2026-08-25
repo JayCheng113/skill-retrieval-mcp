@@ -37,6 +37,10 @@ dependencies = [
     "click>=8.0",
     "pyyaml>=6.0",
     "tqdm>=4.66",
+    # `init` parses Codex's config.toml to decide whether our table can be
+    # appended, and tomllib only became stdlib in 3.11. Without this, that one
+    # step of `init` degrades to printing a snippet for the user to paste.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.urls]

@@ -12,10 +12,16 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 
 import pytest
 
 from skill_mcp import cli
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 
 @pytest.fixture
@@ -355,9 +361,30 @@ def test_a_codex_config_that_is_not_utf8_cannot_abort_init(tmp_path, capsys):
     assert "Registered in" not in capsys.readouterr().out
 
 
-def test_codex_registration_keeps_the_rest_of_the_config(tmp_path):
-    import tomllib
+def test_codex_registration_without_a_toml_parser_cannot_abort_init(tmp_path, monkeypatch, capsys):
+    """`tomllib` only joined the stdlib in 3.11, and this project supports 3.10.
 
+    Registering with Codex is one step of `init`, so a parser that is not there
+    has to end in the same printed snippet as a config we decline to touch. This
+    hides the backport too, so it exercises the branch on every interpreter
+    rather than only on the one where it is reachable by default.
+    """
+    for module in ("tomllib", "tomli"):
+        monkeypatch.setitem(sys.modules, module, None)
+    config = tmp_path / "config.toml"
+    original = 'model = "gpt-5"\n'
+    config.write_text(original, encoding="utf-8")
+
+    cli._register_codex_toml(config, "skill-retrieval", {"command": "skill-mcp", "args": ["serve"]})
+
+    assert config.read_text(encoding="utf-8") == original
+    out = capsys.readouterr().out
+    assert "Registered in" not in out
+    # Refusing is only acceptable if the user can still finish the job by hand.
+    assert "skill-retrieval" in out
+
+
+def test_codex_registration_keeps_the_rest_of_the_config(tmp_path):
     config = tmp_path / "config.toml"
     config.write_text('model = "gpt-5"\n\n[mcp_servers.other]\ncommand = "x"\n', encoding="utf-8")
 
@@ -403,8 +430,6 @@ def test_codex_registration_survives_a_windows_command_path(tmp_path):
     ordinary case on Windows rather than an exotic one — and the damage lands on
     Codex's whole config, not just on our entry.
     """
-    import tomllib
-
     config = tmp_path / "config.toml"
     command = r"C:\Users\v-zhancheng\venv\Scripts\skill-mcp.exe"
 

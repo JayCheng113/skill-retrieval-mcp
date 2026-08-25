@@ -407,6 +407,15 @@ through them turned up the same class of defect three more times.
   of it — a single-quoted YAML scalar ends at the first apostrophe, which an
   account name like `O'Brien` puts straight into the path. `_quoted` emits a
   JSON literal, the grammar both languages read back unchanged.
+- **The parser that reads that TOML is not on every interpreter we support.**
+  `tomllib` became stdlib in 3.11 and the declared floor is 3.10, so the first
+  change to actually exercise the Codex path turned it into an uncaught
+  `ModuleNotFoundError` that aborted all of `init` — the same failure the rest of
+  this section is about, arriving through packaging instead of through a config
+  file. `tomli` is now a dependency below 3.11 so the behaviour is identical
+  everywhere, and a missing parser still ends in the printed snippet rather than
+  a traceback. Local runs cannot see this: on 3.12 the fallback branch is dead
+  code, and only the `test (3.10)` leg of CI reaches it.
 
 ## Extension Points
 
@@ -483,7 +492,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 199 tests, ~6s
+pytest tests/ -v    # 200 tests, ~6s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).

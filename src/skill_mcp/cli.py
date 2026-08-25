@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -366,7 +367,11 @@ def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
     stops Codex loading the file at all, so the user loses their whole setup and
     the parse error points at our table rather than at anything they wrote.
     """
-    import tomllib
+    try:
+        tomllib = _toml_parser()
+    except ModuleNotFoundError:
+        _refuse_codex(path, "needs a TOML parser this interpreter does not have", name, entry)
+        return
 
     existing = ""
     if path.exists():
@@ -396,6 +401,23 @@ def _register_codex_toml(path: Path, name: str, entry: dict) -> None:
 
     path.write_text(candidate, encoding="utf-8")
     click.echo(f"  Registered in {path}")
+
+
+def _toml_parser():
+    """The TOML parser, which only became stdlib in 3.11.
+
+    Below that it is the `tomli` backport `tomllib` was cut from, declared as a
+    dependency for those interpreters. Imported per call rather than at module
+    scope because nothing on the serve path parses TOML, and a missing backport
+    then surfaces where it can be reported instead of at import time.
+    """
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        return tomllib
+    import tomli
+
+    return tomli
 
 
 def _codex_section(name: str, entry: dict) -> str:
