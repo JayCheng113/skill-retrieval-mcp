@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import click
+
+from skill_mcp.config import DEFAULT_DATA_DIR
 
 
 @click.group()
@@ -20,7 +21,7 @@ import click
     "global_data_dir",
     default=None,
     envvar="SKILL_MCP_DATA_DIR",
-    help="Override data directory (default: ~/.skill-mcp, env: SKILL_MCP_DATA_DIR)",
+    help=f"Override data directory (default: {DEFAULT_DATA_DIR}, env: SKILL_MCP_DATA_DIR)",
 )
 @click.option(
     "--log-level",
@@ -57,21 +58,25 @@ def _load_config_from_ctx(ctx):
 
 
 @main.command()
-@click.option("--data-dir", default=None, help="Data directory (default: ~/.skill-mcp)")
+@click.option("--data-dir", default=None, help=f"Data directory (default: {DEFAULT_DATA_DIR})")
 @click.option("--no-register", is_flag=True, help="Skip MCP agent registration")
 @click.pass_context
 def init(ctx, data_dir: str | None, no_register: bool):
     """Initialize skill-retrieval-mcp data directory and config."""
-    from skill_mcp.config import Config, save_config
+    from skill_mcp import config as config_mod
+    from skill_mcp.config import Config, portable_data_dir, save_config, scope_flag
     from skill_mcp.store import SkillStore
 
-    # Global --data-dir takes precedence, then local --data-dir, then default
+    # Global --data-dir takes precedence, then local --data-dir, then default.
+    # The default is read off the module rather than the name bound at import, so
+    # that redirecting it redirects the directory this actually creates and not
+    # only the one `scope_flag` compares against.
     global_dir = ctx.obj.get("data_dir") if ctx.obj else None
-    data_dir = global_dir or data_dir or "~/.skill-mcp"
+    data_dir = global_dir or data_dir or config_mod.DEFAULT_DATA_DIR
     data_path = Path(data_dir).expanduser().resolve()
     data_path.mkdir(parents=True, exist_ok=True)
 
-    config = Config(data_dir=_portable_data_dir(data_dir, data_path))
+    config = Config(data_dir=portable_data_dir(data_dir, data_path))
     save_config(config)
     click.echo(f"Config saved to {config.config_path}")
 
@@ -91,7 +96,7 @@ def init(ctx, data_dir: str | None, no_register: bool):
     # Every command below reads the data directory, and the one that records this
     # choice lives inside it — so a user who chose a directory and then pastes
     # these lines populates the default one instead, with no error anywhere.
-    scope = _scope_flag(data_path)
+    scope = scope_flag(data_path)
 
     click.echo("\nInitialization complete! Next steps:")
     click.echo("  Option A (quick start with the curated skill corpus):")
@@ -99,44 +104,6 @@ def init(ctx, data_dir: str | None, no_register: bool):
     click.echo("  Option B (import your own skills):")
     click.echo(f"    skill-mcp {scope}import --source directory --path <skills-dir>")
     click.echo(f"    skill-mcp {scope}build-index")
-
-
-def _default_data_dir() -> Path:
-    return Path("~/.skill-mcp").expanduser().resolve()
-
-
-def _portable_data_dir(data_dir: str, data_path: Path) -> str:
-    """What `config.yaml` should record, given what the user typed.
-
-    The file is read from whatever directory the agent or the user is in later,
-    so a relative path recorded verbatim names somewhere else there. `~` does
-    survive the move — and re-resolving it per machine is the point on a synced
-    dotfile — so it is kept as typed.
-    """
-    if data_dir.startswith("~") or Path(data_dir).is_absolute():
-        return data_dir
-    return str(data_path)
-
-
-def _scope_flag(data_path: Path) -> str:
-    """The `--data-dir` that the printed next steps carry, quoted to paste.
-
-    Windows gets forward slashes: a resolved directory can end in a backslash
-    (`D:\\`), which escapes the closing quote and swallows the rest of the line
-    into the value, and every Windows API accepts `/` anyway. Wrapping is
-    unconditional because a double quote cannot appear in a Windows path.
-
-    That covers separators, spaces and apostrophes in every shell a Windows user
-    is likely to paste into. It cannot cover a directory whose name expands:
-    `%X%` is substituted by cmd inside double quotes, `$X` by PowerShell and Git
-    bash, and a backtick starts a substitution in bash and an escape in
-    PowerShell. All three are legal in a Windows path and none has a quoting
-    that is inert in cmd as well — cmd understands no quote but this one.
-    """
-    if data_path == _default_data_dir():
-        return ""
-    quoted = f'"{data_path.as_posix()}"' if os.name == "nt" else shlex.quote(str(data_path))
-    return f"--data-dir {quoted} "
 
 
 def _try_register_mcp(data_path: Path) -> None:
@@ -514,18 +481,20 @@ def pull(ctx, replace: bool, include_index: bool):
     """
     import shutil
 
+    from skill_mcp.config import scope_flag
     from skill_mcp.hub import download_skills_db
     from skill_mcp.store import SkillStore
 
     config = _load_config_from_ctx(ctx)
     data_dir = config.resolved_data_dir
+    scope = scope_flag(data_dir)
 
     # Auto-init if needed
     if not data_dir.exists():
-        from skill_mcp.config import Config, save_config
+        from skill_mcp.config import Config, portable_data_dir, save_config
 
         data_dir.mkdir(parents=True, exist_ok=True)
-        save_config(Config(data_dir=str(data_dir)))
+        save_config(Config(data_dir=portable_data_dir(config.data_dir, data_dir.resolve())))
         click.echo(f"Initialized {data_dir}")
 
     click.echo("Downloading skills from HuggingFace...")
@@ -562,7 +531,7 @@ def pull(ctx, replace: bool, include_index: bool):
     if include_index:
         _pull_index(config)
     elif index_path.exists() and not replace:
-        click.echo("Note: run `skill-mcp build-index` to update the index.")
+        click.echo(f"Note: run `skill-mcp {scope}build-index` to update the index.")
     else:
         if replace and index_path.exists():
             # Clean stale index after --replace
@@ -572,7 +541,7 @@ def pull(ctx, replace: bool, include_index: bool):
                 meta.unlink()
             click.echo("Cleared stale index.")
         click.echo("\nNext step:")
-        click.echo("  skill-mcp build-index --backend sentence-transformers")
+        click.echo(f"  skill-mcp {scope}build-index --backend sentence-transformers")
 
 
 def _rebuild_fts(db_path: Path) -> None:
@@ -593,15 +562,18 @@ def _pull_index(config) -> None:
     """Download pre-built index matching the configured embedding backend."""
     import shutil
 
+    from skill_mcp.config import scope_flag
     from skill_mcp.hub import download_index
 
     backend = config.embedding.backend
     model = config.embedding.model
+    scope = scope_flag(config.data_dir)
     click.echo(f"Downloading pre-built index ({backend}/{model})...")
     try:
         index_files = download_index(backend=backend, model=model)
     except FileNotFoundError as e:
         click.echo(str(e))
+        click.echo(f"Run `skill-mcp {scope}build-index --backend {backend}` to build locally.")
         return
 
     # Verify downloaded index matches expected embedding
@@ -614,7 +586,7 @@ def _pull_index(config) -> None:
         click.echo(
             f"WARNING: downloaded index uses {dl_backend}/{dl_model} "
             f"but your config expects {backend}/{model}.\n"
-            f"Run `skill-mcp build-index` to build a compatible index locally."
+            f"Run `skill-mcp {scope}build-index` to build a compatible index locally."
         )
         return
 
@@ -635,7 +607,7 @@ def _pull_index(config) -> None:
         store.close()
         if db_count > index_count:
             click.echo(f"  Note: store has {db_count - index_count:,} skills not in index.")
-            click.echo("  Run `skill-mcp build-index` to include all.")
+            click.echo(f"  Run `skill-mcp {scope}build-index` to include all.")
 
 
 @main.command("import")
@@ -645,25 +617,20 @@ def _pull_index(config) -> None:
     required=True,
 )
 @click.option("--path", "source_path", type=click.Path(exists=True), required=True)
-@click.option(
-    "--db", type=click.Path(), default=None, help="Database path (default: ~/.skill-mcp/skills.db)"
-)
 @click.option("--no-index", is_flag=True, help="Skip automatic index update after import")
 @click.pass_context
-def import_skills(ctx, source: str, source_path: str, db: str | None, no_index: bool):
+def import_skills(ctx, source: str, source_path: str, no_index: bool):
     """Import skills from a source into the store.
 
     After importing, automatically updates the vector index so new skills
     are immediately searchable. Use --no-index to skip this (e.g. when
     batch-importing from multiple sources before a single build).
     """
+    from skill_mcp.config import scope_flag
     from skill_mcp.store import SkillStore
 
     config = _load_config_from_ctx(ctx)
-    if db is None:
-        db = str(config.db_path)
-
-    store = SkillStore(db)
+    store = SkillStore(config.db_path)
     path = Path(source_path)
 
     if source == "directory":
@@ -693,7 +660,10 @@ def import_skills(ctx, source: str, source_path: str, db: str | None, no_index: 
         _auto_index(config, store)
     elif new_skills and no_index:
         if config.index_dir.exists() and (config.index_dir / "index.faiss").exists():
-            click.echo("Index update skipped (--no-index). Run `skill-mcp build-index` when ready.")
+            scope = scope_flag(config.data_dir)
+            click.echo(
+                f"Index update skipped (--no-index). Run `skill-mcp {scope}build-index` when ready."
+            )
 
     store.close()
 
@@ -704,6 +674,7 @@ def _auto_index(config, store) -> None:
     Only runs if an index already exists (meaning the user has a working
     embedding setup). If no index exists, prompts the user to build one.
     """
+    from skill_mcp.config import scope_flag
     from skill_mcp.embeddings import EmbeddingModel
     from skill_mcp.index import SkillIndex
 
@@ -711,9 +682,10 @@ def _auto_index(config, store) -> None:
     model = config.embedding.model
     index_dir = config.index_dir
     existing_index = index_dir / "index.faiss"
+    scope = scope_flag(config.data_dir)
 
     if not existing_index.exists():
-        click.echo("No index found. Run `skill-mcp build-index` to make skills searchable.")
+        click.echo(f"No index found. Run `skill-mcp {scope}build-index` to make skills searchable.")
         return
 
     index = SkillIndex.load(index_dir)
@@ -723,7 +695,7 @@ def _auto_index(config, store) -> None:
             f"Index uses {emb_info.get('backend')}/{emb_info.get('model')} "
             f"but config expects {backend}/{model}. Skipping auto-index."
         )
-        click.echo("Run `skill-mcp build-index --force` to rebuild with the new model.")
+        click.echo(f"Run `skill-mcp {scope}build-index --force` to rebuild with the new model.")
         return
 
     emb = EmbeddingModel(model_name=model, backend=backend)
@@ -761,31 +733,23 @@ def _full_build(config, store, backend: str, model: str) -> None:
 @main.command("build-index")
 @click.option("--backend", default=None, help="Embedding backend (default: from config)")
 @click.option("--model", default=None, help="Embedding model name (default: from config)")
-@click.option("--db", type=click.Path(), default=None)
-@click.option("--output", type=click.Path(), default=None, help="Index output directory")
 @click.option("--force", is_flag=True, help="Overwrite existing index")
 @click.pass_context
-def build_index(
-    ctx, backend: str, model: str | None, db: str | None, output: str | None, force: bool
-):
+def build_index(ctx, backend: str, model: str | None, force: bool):
     """Build FAISS vector index from skill store."""
-    from skill_mcp.config import save_config
+    from skill_mcp.config import save_config, scope_flag
     from skill_mcp.embeddings import EmbeddingModel
     from skill_mcp.index import SkillIndex
     from skill_mcp.store import SkillStore
 
     config = _load_config_from_ctx(ctx)
-    if db is None:
-        db = str(config.db_path)
-    if output is None:
-        output = str(config.index_dir)
     if backend is None:
         backend = config.embedding.backend
     if model is None:
         model = config.embedding.model
 
-    output_path = Path(output)
-    store = SkillStore(db)
+    output_path = config.index_dir
+    store = SkillStore(config.db_path)
     skill_count = store.count()
     if skill_count == 0:
         click.echo("No skills in store. Import skills first.")
@@ -802,7 +766,10 @@ def build_index(
             click.echo(
                 f"Embedding model changed ({emb_info.get('backend')}/{emb_info.get('model')} -> {backend}/{model})."
             )
-            click.echo("Use --force to rebuild with the new model.")
+            click.echo(
+                f"Run `skill-mcp {scope_flag(config.data_dir)}build-index --force` "
+                f"to rebuild with the new model."
+            )
             store.close()
             return
 
@@ -859,8 +826,11 @@ def serve(ctx, transport: str):
 @click.pass_context
 def status(ctx):
     """Show status of skill-retrieval-mcp."""
+    from skill_mcp.config import scope_flag
+
     config = _load_config_from_ctx(ctx)
     data_dir = config.resolved_data_dir
+    scope = scope_flag(config.data_dir)
 
     click.echo(f"Data directory: {data_dir}")
     click.echo(
@@ -880,7 +850,7 @@ def status(ctx):
             click.echo(f"Categories: {', '.join(cats)}")
         store.close()
     else:
-        click.echo("Database: not found (run `skill-mcp init` first)")
+        click.echo(f"Database: not found (run `skill-mcp {scope}init` first)")
 
     index_path = config.index_dir / "index.faiss"
     meta_path = config.index_dir / "skill_ids.json"
@@ -891,7 +861,8 @@ def status(ctx):
         click.echo(f"Index: {index_count} skills ({index_path})")
         if db_count > 0 and index_count != db_count:
             click.echo(
-                f"  WARNING: index ({index_count}) != store ({db_count}). Run `skill-mcp build-index`."
+                f"  WARNING: index ({index_count}) != store ({db_count}). "
+                f"Run `skill-mcp {scope}build-index`."
             )
     else:
         click.echo("Index: not built")
@@ -905,22 +876,24 @@ def status(ctx):
 @click.pass_context
 def search(ctx, query: str, k: int):
     """Search for skills locally (for testing)."""
+    from skill_mcp.config import scope_flag
     from skill_mcp.embeddings import EmbeddingModel
     from skill_mcp.index import SkillIndex
     from skill_mcp.retriever import retrieve
     from skill_mcp.store import SkillStore
 
     config = _load_config_from_ctx(ctx)
+    scope = scope_flag(config.data_dir)
 
     if not config.db_path.exists():
-        click.echo("No skill database found. Run `skill-mcp init` first.")
+        click.echo(f"No skill database found. Run `skill-mcp {scope}init` first.")
         return
 
     store = SkillStore(config.db_path, readonly=True)
 
     index_dir = config.index_dir
     if not (index_dir / "index.faiss").exists():
-        click.echo("No index found. Run `skill-mcp build-index` first.")
+        click.echo(f"No index found. Run `skill-mcp {scope}build-index` first.")
         click.echo("Falling back to keyword search...")
         results = store.search_keyword(query, limit=k)
         for i, s in enumerate(results, 1):
@@ -943,18 +916,14 @@ def search(ctx, query: str, k: int):
 
 
 @main.command()
-@click.option("--db", type=click.Path(), default=None)
 @click.pass_context
-def dedup(ctx, db: str | None):
+def dedup(ctx):
     """Run cross-source deduplication on the skill store."""
     from skill_mcp.dedup import deduplicate_skills
     from skill_mcp.store import SkillStore
 
-    if db is None:
-        config = _load_config_from_ctx(ctx)
-        db = str(config.db_path)
-
-    store = SkillStore(db)
+    config = _load_config_from_ctx(ctx)
+    store = SkillStore(config.db_path)
     before = store.count()
     all_skills = store.get_all()
     deduped = deduplicate_skills(all_skills)

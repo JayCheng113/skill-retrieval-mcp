@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from skill_mcp import cli
+from skill_mcp import config as config_mod
 
 try:
     import tomllib
@@ -496,7 +497,7 @@ def _shell_parsers() -> dict:
 
     Neither performs expansion, so neither can speak for a directory whose name
     contains `%`, `$` or a backtick — and no quoting can either, on Windows. See
-    `_scope_flag`; those names are out of scope rather than covered here.
+    `scope_flag`; those names are out of scope rather than covered here.
     """
     if os.name == "nt":
         return {"CommandLineToArgvW": _windows_argv, "POSIX splitting (Git bash)": shlex.split}
@@ -560,9 +561,9 @@ def test_the_printed_data_dir_survives_a_directory_that_ends_in_a_separator(monk
     tmp_path, which is why this goes at the argument rather than at `init`.
     """
     root = Path(Path(sys.executable).anchor)
-    monkeypatch.setattr(cli, "_default_data_dir", lambda: root / "not-this-one")
+    monkeypatch.setattr(config_mod, "DEFAULT_DATA_DIR", str(root / "not-this-one"))
 
-    line = f"skill-mcp {cli._scope_flag(root)}build-index"
+    line = f"skill-mcp {config_mod.scope_flag(root)}build-index"
 
     for shell, split in _shell_parsers().items():
         argv = split(line)

@@ -54,7 +54,6 @@ def download_index(
             "meta": _hf_download(f"{prefix}/skill_ids.json"),
         }
     except Exception:
-        raise FileNotFoundError(
-            f"No pre-built index for {backend}/{model} on HuggingFace.\n"
-            f"Run `skill-mcp build-index --backend {backend}` to build locally."
-        )
+        # Just the fact. The next step is a command, and the directory it has to
+        # carry is known only to the caller.
+        raise FileNotFoundError(f"No pre-built index for {backend}/{model} on HuggingFace.")

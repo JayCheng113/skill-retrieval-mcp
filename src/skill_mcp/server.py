@@ -15,7 +15,7 @@ from mcp.server import MCPServer
 from mcp.types import TextContent
 
 from skill_mcp import __version__
-from skill_mcp.config import Config
+from skill_mcp.config import Config, scope_flag
 from skill_mcp.embeddings import EmbeddingModel
 from skill_mcp.index import SkillIndex
 from skill_mcp.retriever import retrieve
@@ -54,6 +54,18 @@ _index: SkillIndex | None = None
 _embedding: EmbeddingModel | None = None
 _embedding_spec: tuple[str, str] | None = None
 _embedding_lock = threading.Lock()
+_scope = ""
+
+
+def configure_hints(config: Config) -> None:
+    """Record which directory the repair commands we hand back should name.
+
+    An agent starts us with ``--data-dir`` and our answers are read by a human
+    who runs them in a shell that never saw it. A hint without it repairs the
+    default directory, which is not the one that is broken.
+    """
+    global _scope
+    _scope = scope_flag(config.data_dir)
 
 
 def _get_embedding() -> EmbeddingModel | None:
@@ -179,7 +191,7 @@ def _handle_search_skills(arguments: dict) -> list[TextContent]:
                 type="text",
                 text=json.dumps(
                     {
-                        "error": "Vector index not available. Run `skill-mcp build-index` first.",
+                        "error": f"Vector index not available. Run `skill-mcp {_scope}build-index` first.",
                     }
                 ),
             )
@@ -210,7 +222,7 @@ def _handle_get_skill(arguments: dict) -> list[TextContent]:
             TextContent(
                 type="text",
                 text=json.dumps(
-                    {"error": "Skill store not available. Run `skill-mcp init` first."}
+                    {"error": f"Skill store not available. Run `skill-mcp {_scope}init` first."}
                 ),
             )
         ]
@@ -253,7 +265,7 @@ def _handle_keyword_search(arguments: dict) -> list[TextContent]:
             TextContent(
                 type="text",
                 text=json.dumps(
-                    {"error": "Skill store not available. Run `skill-mcp init` first."}
+                    {"error": f"Skill store not available. Run `skill-mcp {_scope}init` first."}
                 ),
             )
         ]
@@ -281,7 +293,7 @@ def _handle_list_categories() -> list[TextContent]:
             TextContent(
                 type="text",
                 text=json.dumps(
-                    {"error": "Skill store not available. Run `skill-mcp init` first."}
+                    {"error": f"Skill store not available. Run `skill-mcp {_scope}init` first."}
                 ),
             )
         ]
@@ -297,6 +309,8 @@ async def run_server(config: Config, transport: str = "stdio") -> None:
     from disk here would drop it and serve an empty store instead.
     """
     global _store, _index, _embedding_spec
+
+    configure_hints(config)
 
     # Load store in read-only mode
     db_path = config.db_path

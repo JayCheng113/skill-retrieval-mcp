@@ -461,6 +461,49 @@ through them turned up the same class of defect several more times.
   a traceback. Local runs cannot see this: on 3.12 the fallback branch is dead
   code, and only the `test (3.10)` leg of CI reaches it.
 
+### There is one data directory, and every command we print names it
+
+The `init` bullet above fixed the commands `init` prints. The same defect was
+everywhere else: `import`, `build-index`, `search`, `status` and `pull` all end
+by telling the user what to run next, the MCP server hands the agent repair
+commands for a human to paste, and `hub.py` raised an exception whose text was
+one. Twelve sites in the CLI, four in the server and one in the hub named a
+bare `skill-mcp`, so a user who chose a directory repaired the default one and
+was told it worked.
+
+`scope_flag` now lives in `config.py` — the leaf both `cli.py` and `server.py`
+already import — and every one of those sites goes through it. The server takes
+its copy from `configure_hints(config)` at startup, because the agent passed
+`--data-dir` on a command line the human reading the answer never saw.
+`hub.download_index` no longer prints a command at all: it raises the fact, and
+`_pull_index`, which is the caller that knows the directory, supplies the
+command.
+
+`tests/test_printed_commands.py` does not name any of those strings. It scans
+whatever a command actually printed for `skill-mcp ...`, splits each hit with
+the real argv parser for the platform, and asserts `--data-dir` is present and
+points at the directory under test — so a message added later is covered
+without being listed. The fixture is parametrised over `elsewhere`, `my data`
+and `O'Brien`, the three shapes where a path stops surviving the round trip,
+and it repoints `HOME`/`USERPROFILE` first: a command that dropped the flag
+would otherwise write into the developer's real `~/.skill-mcp` and pass.
+
+`pull --help`'s example block is deliberately left unscoped. It is static
+reference text baked in at definition time, before any per-invocation
+`--data-dir` exists, and it never executes.
+
+#### `--db` and `--output` are gone
+
+`import`, `build-index` and `dedup` took a `--db`, and `build-index` also took
+an `--output`. Nothing documented them, no test covered them, and they could
+name a database and an index that were built from different stores. That
+mistake is invisible: `retrieve` skips ids it cannot look up, so a cross-wired
+pair returns nothing at exit 0, and only `status` — which compares the two
+counts — says anything at all. All four are deleted; the paths come from
+`--data-dir` alone. `test_every_indexed_id_resolves_in_the_store_it_was_built_from`
+pins the invariant, and strands an index entry first so the repair it asserts
+is measured against a real violation.
+
 ## Extension Points
 
 ### Adding a new embedding backend
@@ -536,7 +579,7 @@ Config is saved by `build-index` (records which backend/model was used). Never o
 ## Testing
 
 ```bash
-pytest tests/ -v    # 210 tests, ~6s
+pytest tests/ -v    # 240 tests, ~6s
 ```
 
 Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no model download).
@@ -544,7 +587,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | Category | Tests | Coverage |
 |----------|-------|----------|
 | E2E workflow | 16 | init → import → build → search full lifecycle |
-| Cross-feature | 9 | pull+import+build, incremental, dedup+rebuild |
+| Cross-feature | 10 | pull+import+build, incremental, dedup+rebuild, store/index invariant |
 | Server handlers | 11 | null store, invalid IDs, special chars, k=0 |
 | Tool descriptions | 6 | behavioral triggers, workflow references, use-case context |
 | Store | 14 | merge priority, empty source, FTS sync, batch |
@@ -557,6 +600,7 @@ Tests use `--backend mock` (deterministic hash-based 128-dim embeddings, no mode
 | Auto-index | 6 | incremental, no-index, mismatch, no-existing-index, multiple imports |
 | Source compat | 2 | SKILLNET store + dedup priority |
 | Curated importer | 3 | unvetted repo aborts, licence+URL on every row, category |
+| Printed commands | 31 | every `skill-mcp ...` we print carries `--data-dir`, parsed back with the platform's real argv splitter |
 
 ### The retrieval eval
 

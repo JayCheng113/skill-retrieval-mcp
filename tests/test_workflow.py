@@ -1142,6 +1142,72 @@ class TestSkillSourceCompat:
 class TestCrossFeatureLifecycle:
     """Tests that simulate real user workflows spanning multiple commands."""
 
+    def test_every_indexed_id_resolves_in_the_store_it_was_built_from(
+        self, runner, data_dir, skills_dir, tmp_path, monkeypatch
+    ):
+        """A vector whose id is absent from the store is retrieved and then dropped.
+
+        `retrieve` skips ids it cannot look up, so a store and an index built
+        from *different* databases produce a search that returns nothing at exit
+        0 — no error at the point of the mistake, and none afterwards. Only
+        `status`, which compares the two counts, says anything at all.
+
+        Walks a journey rather than one command because the property is about the
+        pair, and asserts the stranding is real before asserting it is repaired:
+        an invariant test that never sees the invariant violated is measuring
+        nothing.
+        """
+        fake_db = _create_fake_hf_db(tmp_path)
+        monkeypatch.setattr("skill_mcp.hub.download_skills_db", lambda: fake_db)
+
+        runner.invoke(main, ["--data-dir", str(data_dir), "pull"])
+        runner.invoke(
+            main,
+            [
+                "--data-dir",
+                str(data_dir),
+                "import",
+                "--source",
+                "directory",
+                "--no-index",
+                "--path",
+                str(skills_dir),
+            ],
+        )
+        runner.invoke(main, ["--data-dir", str(data_dir), "build-index", "--backend", "mock"])
+
+        # Strand an indexed id, so the repair below is asserted against a real
+        # violation. Deleting from the store is the only way to reach it: the
+        # store rejects a content-identical insert, which is why `dedup` finds
+        # nothing to remove here.
+        store = SkillStore(data_dir / "skills.db")
+        store.delete_skill(store.get_all()[0].id)
+        store.close()
+
+        index = SkillIndex.load(data_dir / "index")
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        try:
+            stranded = [sid for sid in index.skill_ids if store.get_skill(sid) is None]
+            assert len(stranded) == 1, "nothing was stranded; the repair below proves nothing"
+        finally:
+            store.close()
+
+        runner.invoke(main, ["--data-dir", str(data_dir), "build-index", "--backend", "mock"])
+
+        index = SkillIndex.load(data_dir / "index")
+        store = SkillStore(data_dir / "skills.db", readonly=True)
+        try:
+            assert index.skill_ids
+            missing = [sid for sid in index.skill_ids if store.get_skill(sid) is None]
+            assert not missing, f"{len(missing)} indexed ids are absent from the store"
+        finally:
+            store.close()
+
+        # The invariant exists to keep this from coming back empty.
+        result = runner.invoke(main, ["--data-dir", str(data_dir), "search", "debug memory"])
+        assert result.exit_code == 0
+        assert "[" in result.output, result.output
+
     def test_pull_import_build_search(self, runner, data_dir, tmp_path, monkeypatch):
         """Full lifecycle: pull HF data → import custom → build-index → search."""
         # 1. Pull HF skills
