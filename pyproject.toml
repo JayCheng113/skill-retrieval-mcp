@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skill-retrieval-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "Lightweight MCP Server for RAG-based skill retrieval"
 readme = "README.md"
 license = "MIT"
